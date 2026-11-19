@@ -1,0 +1,71 @@
+{
+  "settings": {
+    "tree_density": 2.2,
+    "forest_density": 1.8,
+    "forest_big_trees": 1.25,
+    "forest_groves": 1.2,
+    "forest_shrubland": 1.2,
+    "parking_density": 1.5,
+    "fill_frontage": 1,
+    "spawn_density": 6,
+    "zombies_per_resident": 0.8,
+    "apartment_chance": 0.65,
+    "max_levels": 9,
+    "room_size": 24,
+    "basement_share": 0.25,
+    "align_streets": 0,
+    "forest_seed": 2207
+  },
+  "maps": [
+    {
+      "id": "isilkul-villages",
+      "name": "Солнцевка и Водяное, Омская область",
+      "south": 54.960,
+      "west": 71.250,
+      "north": 55.025,
+      "east": 71.370,
+      "scale": 1.75,
+      "cell": [0, 64]
+    },
+    {
+      "id": "omsk-city",
+      "name": "Омск, Омская область",
+      "south": 54.9235,
+      "west": 73.2610,
+      "north": 55.0585,
+      "east": 73.4810,
+      "scale": 2.0,
+      "cell": [12, 54]
+    },
+    {
+      "id": "krasnodar-city",
+      "name": "Краснодар, Краснодарский край",
+      "south": 44.9675,
+      "west": 38.8670,
+      "north": 45.1025,
+      "east": 39.0870,
+      "scale": 2.25,
+      "cell": [67, 0]
+    },
+    {
+      "id": "novosibirsk-city",
+      "name": "Новосибирск, Новосибирская область",
+      "south": 54.9414,
+      "west": 82.7957,
+      "north": 55.0754,
+      "east": 83.0757,
+      "scale": 2.0,
+      "cell": [12, 80]
+    },
+    {
+      "id": "moscow-city",
+      "name": "Москва",
+      "south": 55.6888,
+      "west": 37.4873,
+      "north": 55.8228,
+      "east": 37.7473,
+      "scale": 2.25,
+      "cell": [40, 80]
+    }
+  ]
+}
