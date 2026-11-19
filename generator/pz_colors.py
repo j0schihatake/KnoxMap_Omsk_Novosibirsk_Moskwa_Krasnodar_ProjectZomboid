@@ -1,0 +1,234 @@
+"""Project Zomboid map color palette.
+
+Values taken directly from Thuztor's "Mapping Guide v0.2". These colors are
+interpreted pixel-for-pixel by WorldEd's BMP-to-TMX converter via the
+rules.txt that ships with the ZomboidMapTools.
+
+A PZ cell is 300x300 pixels/tiles. The landscape, vegetation, and zombie
+spawn bitmaps must all line up 1:1 (the spawn map is 10x smaller — one pixel
+per 10 world tiles).
+"""
+from __future__ import annotations
+
+# Landscape (floor) colors — used in the base landscape bitmap.
+DARK_GRASS = (90, 100, 35)
+MEDIUM_GRASS = (117, 117, 47)
+LIGHT_GRASS = (145, 135, 60)
+SAND = (210, 200, 160)
+# The road colours are named for what their tiles look like in Build 42, not
+# for the labels in Rules.txt, which are older than the textures and wrong:
+# Rules.txt calls 120 "Medium Asphalt" but its tiles (blends_street_01_96-103)
+# are pale concrete slabs, and 150 "Smooth Asphalt" is the grey asphalt. With
+# the labels believed, every residential street was paved in slabs and every
+# pavement in tarmac.
+DARK_ASPHALT = (100, 100, 100)   # street2 — dark tarmac; no edge blends, so car parks
+MEDIUM_ASPHALT = (150, 150, 150) # street3 — smooth grey tarmac, blends at its edges
+LIGHT_ASPHALT = (165, 160, 140)  # lightgravel — beige gravel: yards, track beds
+DARKEST_ASPHALT = (80, 80, 80)   # street4 — speckled worn tarmac, blends
+PALE_CONCRETE = (120, 120, 120)  # street — pale concrete slabs: pavements, kerbs
+PAVING = (170, 160, 130)         # sandstone slabs — squares, plazas
+CLAY = (110, 80, 60)             # clay — running tracks
+DIRT = (120, 70, 20)
+# Ground the relief and climate passes use (generator/renderer.py): "Dirt
+# Grass" and "Gravel Dirt" in the stock Rules.txt.
+DIRT_GRASS = (80, 55, 20)
+GRAVEL_DIRT = (140, 70, 15)
+WATER = (0, 138, 255)
+DARK_POTHOLE = (110, 100, 100)
+LIGHT_POTHOLE = (130, 120, 120)
+
+# Ploughed fields: furrowed dirt, rows running across the map (H) or down it
+# (V). Stock WorldEd Rules.txt has both ("Horizontal Dirt", "Vertical Dirt").
+DIRT_ROWS_H = (120, 110, 95)
+DIRT_ROWS_V = (120, 100, 75)
+
+# Vegetation colors — used in the `_veg.bmp` bitmap. Several of these are
+# only valid when painted on top of a specific landscape color (see guide).
+TREES = (255, 0, 0)
+TREES_DARK_GRASS = (127, 0, 0)          # fewer trees + more dark grass
+SPARSE_TREES = (64, 0, 0)               # sparse trees + mostly dark grass
+GRASS_ON_DARK = (0, 255, 0)             # long grass; Rules.txt has it for every grass
+SHORT_GRASS = (0, 250, 0)               # short grass tufts, on any grass ground landscape
+LOT_OF_GRASS_AND_TREES = (0, 128, 0)
+BUSHES_TREES_DARK_GRASS = (255, 0, 255)
+BUSHES = (250, 0, 160)                  # bushes, any ground — hedges
+DENSE_BUSHES_GRASS = (200, 0, 200)      # must sit on DARK_GRASS — wetland
+FLOWERS = (200, 100, 200)               # flowers, any ground — cemeteries
+VEG_NOTHING = (0, 0, 0)
+# Standing corn, two kinds, for fields ("Farm Corn 1/2 (dead)" in the stock
+# Rules.txt: vegetation_farm_01_32..47, low bushes you push through).
+CORN_1 = (255, 128, 0)
+CORN_2 = (220, 100, 0)
+# Rock, for tundra and bare ground ("Boulders" and "Boulders (walkable)" in
+# the stock Rules.txt). BOULDERS block the way; ROCKS can be walked over.
+BOULDERS = (140, 160, 140)
+ROCKS = (100, 120, 100)
+
+# The big trees, each one a single tile whose picture is several tiles across.
+# Build 42's own world generator plants them as the ordinary tree of a wood -
+# in its maple forest a jumbo XL or XXL comes up thirty times more often than
+# a plain tree - and KnoxMap placed none at all, which is why generated woods
+# and parks read as scrub beside Knox County's. The rules for these colours
+# are written by worlded/patch_rules_b42_trees.py; the renderer keeps a clear
+# square around each (generator/rendering/vegetation.py), as the game does,
+# because the picture of one leans over its neighbours.
+TREE_BIG = (255, 0, 1)                  # jumbo: a 2x2 square to itself
+TREE_HUGE = (255, 0, 2)                 # jumbo XL: 3x3
+TREE_GIANT = (255, 0, 3)                # jumbo XXL: 5x5
+# And the other end of it: a young tree, a quarter or half grown. TREES is
+# whatever the rule it falls under calls a tree, which in a wood or a park is
+# a grown one, so without this every tree in a park was the same height.
+TREE_SMALL = (255, 0, 4)
+# How wide a square each one needs, in tiles - the footprints the game's own
+# tree features use (media/lua/server/WorldGen/features/tree).
+BIG_TREE_ROOM = {TREE_BIG: 2, TREE_HUGE: 3, TREE_GIANT: 5}
+
+# Road details on the vegetation bitmap, placed by the rules that
+# worlded/patch_rules_roads.py adds: a kerb on each edge of a pavement tile
+# that meets the road, and centre lines along the edge between two lanes.
+KERB_W = (12, 34, 200)
+KERB_N = (12, 34, 201)
+KERB_S = (12, 34, 202)
+KERB_E = (12, 34, 203)
+KERB_NW = (12, 34, 204)
+KERB_SW = (12, 34, 205)
+KERB_NE = (12, 34, 206)
+KERB_SE = (12, 34, 207)
+# A kerb on a diagonal edge, which the four square kerbs above cannot draw: on a
+# street that crosses the tile grid at an angle the tarmac is diagonal to the
+# square, not beside it. Two per direction - the pair the game's own sheet gives
+# for that 45-degree edge (tools/preview_diag_kerbs.py lists them all).
+KERB_DNW_0 = (12, 34, 208)
+KERB_DNW_1 = (12, 34, 209)
+KERB_DNE_0 = (12, 34, 210)
+KERB_DNE_1 = (12, 34, 211)
+KERB_DSW_0 = (12, 34, 212)
+KERB_DSW_1 = (12, 34, 213)
+KERB_DSE_0 = (12, 34, 214)
+KERB_DSE_1 = (12, 34, 215)
+LINE_YELLOW_N = (12, 35, 200)
+LINE_YELLOW_W = (12, 35, 201)
+LINE_WHITE_N = (12, 35, 202)
+LINE_WHITE_W = (12, 35, 203)
+EDGE_LINE_W = (12, 35, 204)
+EDGE_LINE_N = (12, 35, 205)
+EDGE_LINE_E = (12, 35, 206)
+EDGE_LINE_S = (12, 35, 207)
+# Street furniture and wear (worlded/patch_rules_roads.py).
+ASPHALT_GRIME = (12, 36, 200)
+ASPHALT_CRACKS = (12, 36, 201)
+LAMP_N = (12, 36, 202)
+LAMP_E = (12, 36, 203)
+LAMP_S = (12, 36, 204)
+LAMP_W = (12, 36, 205)
+HYDRANT = (12, 36, 206)
+STORM_DRAIN = (12, 36, 207)
+LITTER = (12, 36, 208)
+MAILBOX = (12, 36, 209)
+BIN = (12, 36, 210)
+# A utility pole on the verge, from the street decoration sheet's bare pole.
+# Painted only when the rules carry it: a colour with no rule behind it is
+# dropped with a warning.
+UTILITY_POLE = (12, 36, 211)
+# Benches, the news kiosk and the blue collection box, one colour per square
+# (worlded/patch_rules_roads.py). A bench is two squares long. The catalogue
+# draws the backless bench in two axes only - orient W runs it along y, orient
+# N along x - so a kerb running north-south takes BENCH_Y.
+BENCH_Y = ((12, 41, 200), (12, 41, 201))
+BENCH_X = ((12, 41, 202), (12, 41, 203))
+KIOSK_N = (12, 41, 212)
+KIOSK_E = (12, 41, 213)
+KIOSK_S = (12, 41, 214)
+KIOSK_W = (12, 41, 215)
+POSTBOX_N = (12, 41, 216)
+POSTBOX_E = (12, 41, 217)
+POSTBOX_S = (12, 41, 218)
+POSTBOX_W = (12, 41, 219)
+# A manhole cover on the pavement.
+MANHOLE = (12, 41, 220)
+# A dog house and a swing in a back yard (knoxbuild/yards.py).
+DOG_HOUSE = (12, 41, 221)
+# Concrete wheel stops across the mouth of a kerbside bay (knoxbuild/build.py).
+# Three squares each, across the bay: PARKING_BLOCK_X runs along x (for a bay
+# on a north-south road), PARKING_BLOCK_Y along y.
+PARKING_BLOCK_X = ((12, 41, 230), (12, 41, 231), (12, 41, 232))
+PARKING_BLOCK_Y = ((12, 41, 233), (12, 41, 234), (12, 41, 235))
+# Speed limit signs from Erika's Tiles, painted only when that mod is set up:
+# (limit, facing) -> colour. A sign faces the traffic that drives past it.
+SPEED_SIGNS = {(25, "S"): (12, 38, 200), (25, "E"): (12, 38, 201),
+               (35, "S"): (12, 38, 202), (35, "E"): (12, 38, 203),
+               (45, "S"): (12, 38, 204), (45, "E"): (12, 38, 205)}
+# Back yards (knoxbuild/yards.py): a grill, patio table and chairs, a
+# clothesline and a raised planting bed, each tile of each its own colour.
+GRILL = (12, 37, 200)
+CHAIR_W = (12, 37, 201)
+CHAIR_N = (12, 37, 202)
+CHAIR_E = (12, 37, 203)
+CHAIR_S = (12, 37, 204)
+TABLE_X0 = (12, 37, 205)
+TABLE_X1 = (12, 37, 206)
+TABLE_Y0 = (12, 37, 207)
+TABLE_Y1 = (12, 37, 208)
+LINE_X0 = (12, 37, 209)
+LINE_XM = (12, 37, 210)
+LINE_X1 = (12, 37, 211)
+LINE_Y0 = (12, 37, 212)
+LINE_YM = (12, 37, 213)
+LINE_Y1 = (12, 37, 214)
+BED_NW = (12, 37, 215)
+BED_W = (12, 37, 216)
+BED_SW = (12, 37, 217)
+BED_N = (12, 37, 218)
+BED_S = (12, 37, 219)
+BED_NE = (12, 37, 220)
+BED_E = (12, 37, 221)
+BED_SE = (12, 37, 222)
+BED_SOIL = (12, 37, 223)
+# Works yards (knoxbuild/works.py): what stands along a works' walls, and its
+# dumpster, a two-tile piece set as two colours each way it faces.
+WORKS_PALLET = (12, 39, 200)
+WORKS_BRICKS = (12, 39, 201)
+WORKS_DRUM = (12, 39, 202)
+WORKS_BARREL = (12, 39, 203)
+WORKS_CRATE = (12, 39, 204)
+WORKS_TIRES = (12, 39, 205)
+DUMPSTER_BLUE_S0 = (12, 39, 206)
+DUMPSTER_BLUE_S1 = (12, 39, 207)
+DUMPSTER_BLUE_E0 = (12, 39, 208)
+DUMPSTER_BLUE_E1 = (12, 39, 209)
+DUMPSTER_ORANGE_S0 = (12, 39, 210)
+DUMPSTER_ORANGE_S1 = (12, 39, 211)
+DUMPSTER_ORANGE_E0 = (12, 39, 212)
+DUMPSTER_ORANGE_E1 = (12, 39, 213)
+# Ground: the stone slabs of a front path or a stoop (Rules.txt "Paving Stone 4").
+PAVING_STONE = (190, 180, 180)
+# Track cross-sections: rail, sleepers, rail, over solid ballast.
+RAIL_NE_SW = (200, 30, 200)
+RAIL_NW_SE = (201, 31, 201)
+RAIL_NE_SW_W = (202, 32, 202)
+RAIL_NE_SW_E = (203, 33, 203)
+RAIL_NW_SE_N = (204, 34, 204)
+RAIL_NW_SE_S = (205, 35, 205)
+
+# Zombie spawn map: grayscale, 10x smaller than landscape/vegetation.
+# (0,0,0) = no spawns, (255,255,255) = max spawn density.
+
+# Valid color sets used for rules.txt-style validation if needed.
+LANDSCAPE_COLORS = {
+    DARK_GRASS, MEDIUM_GRASS, LIGHT_GRASS, SAND,
+    DARK_ASPHALT, MEDIUM_ASPHALT, LIGHT_ASPHALT, DARKEST_ASPHALT,
+    PALE_CONCRETE, PAVING, CLAY, DIRT,
+    RAIL_NE_SW, RAIL_NW_SE, RAIL_NE_SW_W, RAIL_NE_SW_E,
+    RAIL_NW_SE_N, RAIL_NW_SE_S,
+    WATER, DARK_POTHOLE, LIGHT_POTHOLE, DIRT_ROWS_H, DIRT_ROWS_V,
+    DIRT_GRASS, GRAVEL_DIRT,
+}
+VEGETATION_COLORS = {
+    TREES, TREES_DARK_GRASS, SPARSE_TREES, GRASS_ON_DARK,
+    LOT_OF_GRASS_AND_TREES, BUSHES_TREES_DARK_GRASS, VEG_NOTHING,
+    BUSHES, DENSE_BUSHES_GRASS, FLOWERS,
+    TREE_BIG, TREE_HUGE, TREE_GIANT, CORN_1, CORN_2, BOULDERS, ROCKS,
+}
+
+CELL_SIZE = 300  # tiles per cell side — fixed by the game engine
+SPAWN_MAP_SCALE = 10  # spawn map is 1/10th the resolution

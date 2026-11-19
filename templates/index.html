@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KnoxMap {{ version }}</title>
+<link rel="icon" type="image/png" href="/static/logo.png"/>
+<!-- The map library is bundled in static/vendor (see LICENSES.md), so the
+     window works offline and contacts no third party but OpenStreetMap. -->
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css"/>
+<link rel="stylesheet" href="/static/vendor/leaflet-draw/leaflet.draw.css"/>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<link rel="stylesheet" href="/static/css/shell.css"/>
+</head>
+<body class="ws-loading" data-in-window="{{ 1 if in_window else 0 }}">
+
+<header class="topbar">
+  <img src="/static/logo.png" alt="" class="logo"/>
+  <h1>KnoxMap</h1>
+  <span class="version-wrap">
+    <button type="button" class="version" id="appVersion" aria-haspopup="true" aria-expanded="false"
+            title="The KnoxMap version you are running. Click to choose another"
+            >v{{ version }}<span class="version-dot" id="versionDot" hidden
+             title="A newer KnoxMap is out"></span></button>
+    <div id="versionMenu" class="version-menu" role="dialog" aria-label="KnoxMap versions" hidden>
+      <div class="version-menu-head">
+        <b>KnoxMap versions</b>
+        <button type="button" class="version-menu-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="hint">Any release from GitHub. The one you pick downloads now and goes in
+        when KnoxMap restarts; your maps and settings stay.</p>
+      <div id="versionNote" class="hint"></div>
+      <ul id="versionList" class="version-list"><li class="hint">Asking GitHub…</li></ul>
+    </div>
+  </span>
+  <span class="byline">real places as Project Zomboid maps &middot; by euclid80tr &amp; SolarisMare &middot; <a href="https://discord.gg/ePM8dSxPm7" target="_blank" rel="noopener">discord</a> &middot; <a href="#" id="reportLink">report a problem</a></span>
+  <select id="language" class="language" data-no-translate
+          title="The window's language. Copy lang/english.txt, translate it and name it after your language" hidden></select>
+  <span id="updateNote" class="update-note" hidden></span>
+</header>
+
+<main>
+  <section id="map-pane">
+    <div id="search-box">
+      <input id="searchInput" type="search" autocomplete="off"
+             placeholder="Search for a place and press Enter" />
+      <label class="search-scope">
+        <input type="checkbox" id="searchHere" /> in this view
+      </label>
+      <ul id="search-results" hidden></ul>
+    </div>
+
+    <div id="basemaps" role="radiogroup" aria-label="Basemap">
+      <button type="button" data-base="dark" class="is-on">Dark</button>
+      <button type="button" data-base="streets">Light</button>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="map-hint">
+      Search for a place, or draw an area with the tools on the left.
+      A search result's <b>outline</b> button picks its real boundary.
+      <button type="button" class="hint-close" aria-label="Dismiss">&times;</button>
+    </div>
+
+    <div id="gen-overlay" hidden>
+      <div class="gen-box">
+        <div class="gen-kicker">Generating terrain</div>
+        <div id="gen-stage">Contacting OpenStreetMap…</div>
+        <div id="gen-detail"></div>
+        <div class="bar"><div id="gen-bar" class="bar-fill"></div></div>
+        <div class="gen-elapsed"><span id="gen-clock">0:00</span><span id="gen-eta"></span></div>
+        <button id="stopOverlayBtn" class="btn btn-small btn-stop" data-stop>Stop</button>
+      </div>
+    </div>
+  </section>
+
+  <aside id="controls">
+    <section class="panel setup-card" id="setupCard" hidden>
+      <h2>Setup isn't finished</h2>
+      <p>You can make terrain and buildings already. To compile maps for the game,
+        run <b id="setupScript">Setup.bat</b> once:</p>
+      <ul class="setup-list" id="setupList"></ul>
+      <button type="button" id="setupDismiss" class="setup-dismiss" title="Dismiss until something else is missing"
+              aria-label="Dismiss">✕</button>
+    </section>
+
+    <section class="panel" id="healthCard">
+      <details id="healthPanel">
+        <summary>Check my setup</summary>
+        <p class="hint">What is installed, what this PC can hold, and whether the
+          OpenStreetMap servers are answering.</p>
+        <button id="healthBtn" class="btn btn-small" type="button">Check now</button>
+        <div id="healthOut"></div>
+      </details>
+    </section>
+
+    <section class="panel" id="overpassCard">
+      <details id="overpassPanel">
+        <summary>Map data server</summary>
+
+        <div class="field-label" style="font-weight: 600; margin-bottom: 6px;">OpenStreetMap data source</div>
+        <div class="osm-source-cards" id="osmSourceCards" role="radiogroup" aria-label="OpenStreetMap data source">
+          <button type="button" class="osm-source-card is-on" data-source="overpass">
+            <span class="osm-source-badge">Fast</span>
+            <b>Overpass API</b>
+            <small>Online queries</small>
+          </button>
+          <button type="button" class="osm-source-card" data-source="auto">
+            <span class="osm-source-badge">Default</span>
+            <b>Auto</b>
+            <small>Extract / Live</small>
+          </button>
+          <button type="button" class="osm-source-card" data-source="extract">
+            <span class="osm-source-badge">Offline</span>
+            <b>Geofabrik</b>
+            <small>Regional dump</small>
+          </button>
+        </div>
+        <div id="osmSourceDesc" class="stat-note" style="margin-top: 6px; margin-bottom: 12px; font-size: 12px; line-height: 1.45;"></div>
+
+        <h4>Overpass server addresses</h4>
+        <p class="hint">Map data is downloaded from public OpenStreetMap servers. Large or
+          repeated downloads should use your own: list its address below, one per line
+          (see docs/SELF_HOSTING_OVERPASS.md). Leave it empty for the public ones.</p>
+        <textarea id="overpassList" rows="3" spellcheck="false"
+          placeholder="http://localhost:12345/api/interpreter"></textarea>
+        <button id="overpassSave" class="btn btn-small" type="button">Save</button>
+        <button id="overpassPublic" class="btn btn-small" type="button">Fill in the public servers</button>
+        <span id="overpassNote" class="step-note"></span>
+        <h4>Are they answering?</h4>
+        <button id="overpassTest" class="btn btn-small" type="button">Test the servers</button>
+        <div id="overpassStatus"></div>
+        <h4>Run your own server (Docker)</h4>
+        <p class="hint">Needs Docker Desktop. Downloads one region from Geofabrik and serves it
+          from this PC; loading takes minutes to hours. Maps outside the region will
+          come from the public servers.</p>
+        <input id="localExtract" type="text" spellcheck="false"
+          placeholder="https://download.geofabrik.de/north-america/us/tennessee-latest.osm.pbf">
+        <button id="localStart" class="btn btn-small" type="button">Start</button>
+        <button id="localUse" class="btn btn-small" type="button" hidden>Use it</button>
+        <button id="localStop" class="btn btn-small" type="button" hidden>Stop</button>
+        <button id="localRemove" class="btn btn-small" type="button" hidden>Remove</button>
+        <div id="localNote" class="step-note"></div>
+      </details>
+    </section>
+
+    <div id="toolsBody" class="tools-body">
+        <h4>Extract file — pick one for every map</h4>
+        <p class="hint">Pick a <code>.osm.pbf</code> and every map reads that file, instead of
+          KnoxMap asking Geofabrik which extract covers the area. If the file cannot be
+          read the map stops and says why, rather than quietly asking the public servers.</p>
+        <input id="pbfFile" type="text" spellcheck="false" placeholder="C:\maps\tennessee-latest.osm.pbf">
+        <button id="pbfBrowse" class="btn btn-small" type="button">Browse…</button>
+        <button id="pbfUse" class="btn btn-small" type="button">Use this file</button>
+        <button id="pbfClear" class="btn btn-small" type="button">Choose by area</button>
+        <span id="pbfNote" class="step-note"></span>
+        <div class="field-label" style="margin-top: 10px; font-weight: 600;">Check the file before building</div>
+        <p class="hint">Says whether the extract is whole, whether it covers the area, and whether
+          there are roads and buildings in it. Exit code and report come from the same check as
+          <code>tools/verify_pbf.py</code>.</p>
+        <button id="pbfCheck" class="btn btn-small" type="button">Check it</button>
+        <span id="pbfCheckNote" class="step-note"></span>
+        <pre id="pbfReport" class="pbf-report" hidden></pre>
+
+    </div>
+
+    <section class="panel" id="mapsCard" hidden>
+      <details id="mapsPanel">
+        <summary>Your maps <span class="count" id="mapsCount"></span></summary>
+        <p class="hint">Maps already in this folder. Open one to build, compile or install
+          it again without drawing it afresh.</p>
+        <ul class="map-list" id="mapList"></ul>
+      </details>
+    </section>
+
+    <section class="panel" data-card="area">
+      <h2>1. Area</h2>
+      <details id="presetsPanel" class="presets">
+        <summary>Saved areas <span class="count" id="presetsCount"></span></summary>
+        <p class="hint">Keep the area you have drawn, with its scale and settings,
+          under a name, and bring it back later.</p>
+        <div class="preset-row">
+          <select id="presetList" aria-label="Saved areas"></select>
+          <button id="presetLoad" class="btn btn-small" type="button">Load</button>
+          <button id="presetDelete" class="btn btn-small" type="button">Delete</button>
+        </div>
+        <div class="preset-row">
+          <input type="text" id="presetName" maxlength="60" placeholder="Name for this area">
+          <button id="presetSave" class="btn btn-small" type="button">Save</button>
+        </div>
+        <div class="preset-row preset-share">
+          <button id="presetExport" class="btn btn-small" type="button">Export file</button>
+          <button id="presetImport" class="btn btn-small" type="button">Import file</button>
+          <button id="presetShare" class="btn btn-small" type="button">Copy link</button>
+          <button id="presetOpenLink" class="btn btn-small" type="button">Open link</button>
+          <input id="presetFile" type="file" accept=".json,application/json" hidden>
+        </div>
+        <p class="hint">Share an area and its settings. Imported presets can be saved here or generated directly.</p>
+        <div id="presetNote" class="hint"></div>
+        <button id="presetRestore" class="btn btn-small" type="button" hidden>Restore last backup</button>
+      </details>
+      <!-- The corners of the area. They report what was drawn, and they are
+           also a way to draw it: type four degrees and the box appears,
+           which is how somebody who knows exactly where their map ends
+           starts from the numbers instead of the mouse. -->
+      <div id="coordsBox" class="coords-box">
+        <div class="coords">
+          <label>S <input type="number" step="0.000001" id="south"
+                          placeholder="-90 to 90"></label>
+          <label>W <input type="number" step="0.000001" id="west"
+                          placeholder="-180 to 180"></label>
+          <label>N <input type="number" step="0.000001" id="north"
+                          placeholder="-90 to 90"></label>
+          <label>E <input type="number" step="0.000001" id="east"
+                          placeholder="-180 to 180"></label>
+          <button type="button" id="coordsApply" class="btn btn-small">Use these
+            corners</button>
+        </div>
+        <div id="coordsNote" class="hint"></div>
+      </div>
+      <div id="landmark-panel">
+        <button id="landmarksBtn" class="btn" disabled>List named places in the area</button>
+        <div id="landmark-results"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-card="style">
+      <h2>2. Settings</h2>
+      <select id="preset" hidden>
+        <option value="town" selected>Town</option>
+        <option value="suburb">Suburb</option>
+        <option value="city">City</option>
+        <option value="rural">Rural</option>
+      </select>
+      <!-- Zones (Tools, Zones) set some of these differently in parts of the
+           map; this says so, and opens them. -->
+      <details id="zonesNotice" class="zones-notice" hidden>
+        <summary><span class="zones-notice-what"></span></summary>
+        <ul class="zones-notice-list"></ul>
+      </details>
+      <!-- Warnings about the whole map (its size), at the top. -->
+      <div id="areaWarnings" class="area-warnings"></div>
+      <!-- Shown once a map is open: which of these knobs have been moved
+           since it was made, and a button to put them into it without
+           drawing the box or setting everything a second time. -->
+      <div id="reapply" class="reapply" hidden></div>
+      <input type="search" id="settingFind" class="list-search" hidden
+             autocomplete="off" placeholder="Search the settings">
+      <!-- The tabs: filled from /api/settings so the page never holds a second,
+           drifting copy of the limits. -->
+      <div id="advanced-body"></div>
+      <!-- Parts of a tab that are fields of the page rather than settings of
+           the generator; buildSettingsForm puts each into its tab. -->
+      <div id="settingsParts" hidden>
+        <div class="tab-part" data-part="map">
+          <label class="field setting setting-static">Map name
+            <input type="text" id="mapName" value="" placeholder="leave blank for an automatic name"/>
+          </label>
+          <label class="field setting setting-static">Scale (metres per tile)
+            <input type="number" id="metersPerTile" list="metersPerTileOptions"
+                   value="1" min="0.5" max="100" step="0.25" inputmode="decimal"
+                   title="Metres of the real place in one game tile, to the quarter metre. 1 is recommended; 1 to 8 is the usual range. 0.5 doubles the detail on a small area, and 1.5 is the middle ground between a town at full size and one at half."/>
+            <datalist id="metersPerTileOptions">
+              <option value="0.5" label="0.5 m per tile (small areas, twice the detail)"></option>
+              <option value="1" label="1 m per tile (recommended)"></option>
+              <option value="1.5" label="1.5 m per tile (two thirds the size)"></option>
+              <option value="2" label="2 m per tile"></option>
+              <option value="3" label="3 m per tile"></option>
+              <option value="4" label="4 m per tile"></option>
+              <option value="6" label="6 m per tile"></option>
+              <option value="8" label="8 m per tile (whole regions)"></option>
+            </datalist>
+          </label>
+          <div class="setting setting-static">
+            <div class="field-label">Kind of place</div>
+            <div class="preset-cards" id="presetCards" role="radiogroup" aria-label="Kind of place">
+              <button type="button" class="preset-card is-on" data-preset="town" role="radio" aria-checked="true">Town</button>
+              <button type="button" class="preset-card" data-preset="suburb" role="radio" aria-checked="false">Suburb</button>
+              <button type="button" class="preset-card" data-preset="city" role="radio" aria-checked="false">City</button>
+              <button type="button" class="preset-card" data-preset="rural" role="radio" aria-checked="false">Rural</button>
+            </div>
+          </div>
+          <!-- Drawn like the generated settings' switches (settingElement). -->
+          <div class="setting setting-static setting-compact setting-switch">
+            <span class="setting-name">Only what I draw<button type="button" class="setting-info"
+              aria-label="About Only what I draw" aria-expanded="false">i</button></span>
+            <label class="switch"><input type="checkbox" role="switch" id="drawnOnly"
+              aria-label="Only what I draw"><span class="switch-track" aria-hidden="true"><span
+              class="sw-on">On</span><span class="sw-off">Off</span></span></label>
+            <span class="setting-hint" role="tooltip">Nothing is downloaded, so a place that is not on
+              OpenStreetMap can be built from what is drawn under Features.</span>
+          </div>
+        </div>
+        <!-- After the tab's own settings: the area, its corners and what it
+             comes to. -->
+        <div class="tab-part" data-part="map-area">
+          <div class="setting-subhead">Extent</div>
+          <div class="setting setting-static">
+            <div id="area-stats" class="empty">
+              <div class="empty-state">Nothing selected yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button type="button" id="resetSettings" class="linkish">Reset to the defaults for this kind of place</button>
+
+      <details id="steamLibraries">
+        <summary>Steam libraries</summary>
+        <p class="hint">Where KnoxMap looks for the game and Workshop mods. They are found on
+          their own; if yours are on a drive that was missed, name it here.</p>
+        <ul class="setup-list" id="steamList"></ul>
+        <label class="field">Other drives or folders (separated by ;)
+          <input type="text" id="steamFolders" placeholder="E: or E:\Games\Steam"/>
+        </label>
+        <button type="button" id="steamSave" class="btn">Save and look again</button>
+        <div id="steamNote" class="hint"></div>
+      </details>
+
+      <details id="zomboidFolderBox">
+        <summary>Where maps are installed</summary>
+        <p class="hint">Maps are installed into the mods folder inside it. Leave it empty
+          for the default.</p>
+        <label class="field">Zomboid folder
+          <input type="text" id="zomboidFolder" placeholder="C:\Users\you\Zomboid"/>
+        </label>
+        <button type="button" id="zomboidSave" class="btn">Save</button>
+        <div id="zomboidNote" class="hint"></div>
+      </details>
+    </section>
+
+    <!-- Drawing and editing, as one step rather than three scattered ones.
+         Everything here becomes an ordinary OSM feature before it reaches the
+         generator, so a drawn street is a street as far as every later step
+         can tell (generator/sketch.py); what is changed about a map that
+         already exists is kept beside it as a list of changes
+         (generator/edits.py). -->
+    <section class="panel" data-card="make">
+      <h2>3. Draw and edit <span class="step-note">optional</span></h2>
+
+      <button type="button" id="boardOpen" class="btn btn-wide">Draw a map from
+        scratch</button>
+      <p class="hint">A blank sheet measured in metres, with no world map under
+        it - for a town that is not anywhere.</p>
+
+      <details id="sketch">
+        <summary>Features <span class="count" id="sketchCount"></span></summary>
+        <p class="hint">Pick what to draw, then draw it on the map. It is built
+          exactly as a surveyed one would be - a street gets its pavement,
+          kerbs and parked cars; a house gets rooms, loot and people.</p>
+        <!-- What is picked on the map, always shown: No selection until then. -->
+        <div id="sketchTools" class="sketch-actions"></div>
+        <div id="sketchPicked" class="edit-selected is-empty"><span class="hint">No selection</span></div>
+        <div class="setting setting-compact setting-switch sketch-rect">
+          <span class="setting-name">Draw areas as boxes<button type="button" class="setting-info"
+            aria-label="About Draw areas as boxes" aria-expanded="false">i</button></span>
+          <label class="switch"><input type="checkbox" role="switch" id="sketchRect"
+            aria-label="Draw areas as boxes"><span class="switch-track" aria-hidden="true"><span
+            class="sw-on">On</span><span class="sw-off">Off</span></span></label>
+          <span class="setting-hint" role="tooltip">On, a house, a park or a field is drawn by dragging
+            out a box. Off, by clicking each of its corners. Roads and paths are always clicked point
+            by point.</span>
+        </div>
+        <input type="search" id="sketchFind" class="list-search" hidden
+               autocomplete="off" placeholder="Search what to draw">
+        <div id="sketchPalette" class="sketch-palette"></div>
+        <div id="sketchNote" class="hint"></div>
+      </details>
+
+      <details id="zonesPanel">
+        <summary>Zones of their own <span class="count" id="zoneCount"></span></summary>
+        <p class="hint">Draw a part of the map and give it its own settings -
+          a town centre that is taller and thick with zombies, an estate all
+          in one brick, a quiet edge. Anything outside every zone is built to
+          the settings in Properties.</p>
+        <div class="sketch-actions">
+          <button type="button" id="zoneDraw" class="btn">Draw a zone</button>
+          <button type="button" id="zoneSave" class="btn" disabled>Save zones</button>
+        </div>
+        <div id="zoneTools" class="sketch-actions"></div>
+        <!-- One foldable item per zone; the open one holds its settings
+             (zoneEditor, moved into it by drawZoneList). -->
+        <ul id="zoneList" class="zone-list"></ul>
+        <div id="zoneEditor" class="zone-editor" hidden></div>
+        <div id="zoneNote" class="hint"></div>
+      </details>
+
+      <details id="handBuilt">
+        <summary>Hand-built buildings <span class="count" id="builtCount"></span></summary>
+        <p class="hint">Build a police station, a church or a house yourself -
+          its rooms where you want them - and have the generator use it
+          wherever the map has one of those, instead of laying out its own.</p>
+        <div class="sketch-actions">
+          <button type="button" id="builderOpen" class="btn">Build a building
+            by hand</button>
+          <button type="button" id="builtImport" class="btn">Take one in</button>
+          <input type="file" id="builtFile" accept=".json,application/json" hidden>
+        </div>
+        <p class="hint">Share sends a building out as one file. Take one in
+          reads one somebody sent you. Buildings sent to the KnoxMap Discord
+          can go into the library that ships with it, for everybody.</p>
+        <p class="hint">Use hand-built buildings for:</p>
+        <div id="builtKinds" class="sketch-palette"></div>
+        <input type="search" id="builtFind" class="list-search" hidden
+               autocomplete="off" placeholder="Search the hand-built buildings">
+        <ul id="builtList" class="zone-list"></ul>
+        <div id="builtNote" class="hint"></div>
+      </details>
+
+      <details id="editMap">
+        <summary>Change what is already here
+          <span class="count" id="editCount"></span></summary>
+        <p class="hint">Open a map, then load what it was built from. Click a
+          building and it says whether it was built, and if it was not, why
+          not and what to change. Click anything to remove it or say what it
+          really is; drag its corners to move it. Generate map again and the
+          change is in.</p>
+        <div class="sketch-actions">
+          <button type="button" id="editLoad" class="btn" disabled>Load what is here</button>
+          <button type="button" id="editShape" class="btn" disabled>Move and reshape</button>
+          <button type="button" id="editSave" class="btn" disabled>Save changes</button>
+          <button type="button" id="editReset" class="btn" disabled>Undo all</button>
+        </div>
+        <div id="editSelected" class="edit-selected" hidden></div>
+        <div id="editNote" class="hint"></div>
+      </details>
+    </section>
+
+    <section class="panel" data-card="generate">
+      <button id="generateBtn" class="btn btn-primary" disabled>Generate map</button>
+      <div id="status"></div>
+    </section>
+  </aside>
+</main>
+
+<section id="results" hidden>
+  <h2>Map: <span class="ph map-badge">—</span>
+    <button type="button" id="resultsDelete" class="btn btn-small btn-danger results-delete"
+            title="Delete this map and all its files">Delete map</button>
+    <button type="button" id="resultsClose" class="btn btn-small results-close"
+            title="Close this map and go back to make another">Close</button></h2>
+
+  <div id="upgradeNote" class="upgrade-note" hidden></div>
+
+  <div id="results-grid">
+    <figure class="preview-frame">
+      <a id="previewLink" target="_blank"><img id="previewImg" alt="Map preview"/></a>
+      <figcaption>Preview</figcaption>
+    </figure>
+    <div class="results-side">
+      <div id="results-info"></div>
+      <a id="downloadAll" class="btn" download>Download everything (.zip)</a>
+      <div id="saveNote" class="hint"></div>
+      <button id="makePictures" class="btn" type="button" hidden>Draw a picture of it</button>
+      <div id="pictureNote" class="hint"></div>
+      <div id="pictureShots" class="shots" hidden></div>
+      <details id="downloads-details">
+        <summary>Single files</summary>
+        <ul id="downloads"></ul>
+      </details>
+      <button id="deleteMapSideBtn" class="btn btn-danger" type="button" style="margin-top: 10px;">Delete this map</button>
+    </div>
+  </div>
+
+  <h3>Finish the map</h3>
+  <ol class="pipeline">
+    <li class="pipe-card" data-step="buildings">
+      <div class="pipe-body">
+        <div class="pipe-title">3. Buildings</div>
+        <span id="buildingsNote" class="step-note">Makes a furnished building for every footprint.</span>
+        <!-- What did not get built, said plainly and in the open. The reasons
+             used to live in knoxmap.log, where nobody looks. -->
+        <div id="leftOut" class="left-out" hidden></div>
+        <div class="bar bar-indet"><div class="bar-fill"></div></div>
+        <div id="layoutPreview" class="layout-preview" hidden>
+          <div class="census-head">What was built
+            <select id="layoutLayer" aria-label="Layout view">
+              <option value="kinds">buildings by use</option>
+              <option value="zombies">zombie density</option>
+            </select>
+          </div>
+          <a id="layoutLink" target="_blank" rel="noopener"><img id="layoutImg" alt="Layout preview"/></a>
+          <div class="step-note">Check the mix and the zombies here before compiling.
+            Change a setting and build again if it looks wrong.</div>
+        </div>
+        <div id="census" class="census" hidden>
+          <div class="census-head">Population</div>
+          <div class="tiles census-tiles" id="censusTiles"></div>
+          <div class="census-official" id="censusOfficial"></div>
+          <div id="censusAudit" class="census-audit" hidden></div>
+          <div class="census-actions">
+            <button id="recountBtn" class="btn btn-small" type="button">Recount</button>
+            <span id="censusNote" class="step-note">Change the zombie settings in Properties, on
+              the Gameplay tab, then recount. No need to rebuild.</span>
+          </div>
+        </div>
+      </div>
+      <button id="buildingsBtn" class="btn">Build</button>
+      <button class="btn btn-stop" data-stop hidden>Stop</button>
+    </li>
+    <li class="pipe-card" data-step="place">
+      <div class="pipe-body">
+        <div class="pipe-title">4. Place on the world map <span class="step-note">optional</span></div>
+        <!-- Where the map stands in the world every installed map shares.
+             Picked here rather than packed in automatically
+             (knoxbuild/placement.py). -->
+        <div id="placePanel">
+          <div class="place-where">Where it goes
+            <span class="count" id="placeWhere"></span></div>
+          <p class="hint">Knox County sits in the corner of the world, and
+            every map you install shares that grid. Click to put yours
+            somewhere else - north of the vanilla map, far out on its own, or
+            right beside another of your own towns.</p>
+          <label class="place-standalone">
+            <input type="checkbox" id="placeStandalone">
+            Standalone: play it without Knox County
+          </label>
+          <p class="hint" id="placeStandaloneHint">Moves the map to the corner of the
+            world (cell 0,0) and installs it without the Muldraugh, KY link, so it is the whole
+            world. Ticking it moves the map, so compile again afterwards. Experimental: try it in the game, and untick this and install
+            again if it will not load. Untick it to put the map back on the shared
+            world, and over Knox County if you like: a map put on top of Knox County
+            replaces the vanilla cells under it.</p>
+          <canvas id="placeCanvas" width="720" height="470" tabindex="0"
+                  aria-label="The world, with Knox County and your map on it"></canvas>
+          <div class="place-row">
+            <button type="button" id="placeZoomOut" class="btn btn-small"
+                    title="Zoom out (minus key)">−</button>
+            <button type="button" id="placeZoomIn" class="btn btn-small"
+                    title="Zoom in (plus key, or the mouse wheel)">+</button>
+            <button type="button" id="placeZoomFit" class="btn btn-small"
+                    title="Show the whole world (0)">Whole world</button>
+            <span class="hint">Wheel or + and − to zoom, middle mouse button to
+              drag the view.</span>
+          </div>
+          <div class="place-row">
+            <label>Cell <input type="number" id="placeX" min="0" max="400">
+              , <input type="number" id="placeY" min="0" max="400"></label>
+            <button type="button" id="placeApply" class="btn btn-small">Put it
+              here</button>
+            <button type="button" id="placeAuto" class="btn btn-small">Place it
+              for me</button>
+          </div>
+          <!-- Two maps in one world have empty grid between them. A road drawn
+               across it becomes a map of its own, built and compiled like any
+               other, and the game joins them up. -->
+          <div class="place-row">
+            <button type="button" id="placeRoad" class="btn btn-small">Draw a
+              road</button>
+            <select id="placeRoadKind">
+              <option value="primary">Main road</option>
+              <option value="secondary">Through road</option>
+              <option value="residential">Street</option>
+              <option value="track">Dirt track</option>
+              <option value="railway">Railway</option>
+            </select>
+            <button type="button" id="placeRoadUndo" class="btn btn-small"
+                    disabled>Undo point</button>
+            <button type="button" id="placeLink" class="btn btn-small" disabled>
+              Make the road map</button>
+          </div>
+          <div id="placeNote" class="hint"></div>
+        </div>
+      </div>
+    </li>
+    <li class="pipe-card" data-step="compile">
+      <div class="pipe-body">
+        <div class="pipe-title">5. Compile</div>
+        <span id="compileNote" class="step-note">Turns the map into the game's files.
+          Takes a few minutes.</span>
+        <div class="bar"><div id="compileBar" class="bar-fill"></div></div>
+        <button id="retryCellsBtn" class="btn btn-small" hidden>Compile the cells that failed</button>
+        <details class="manual-fallback">
+          <summary>Or do it yourself in WorldEd</summary>
+          <button id="worldedBtn" class="btn btn-small" disabled>Open in WorldEd</button>
+          <span id="worldedNote" class="step-note">Then
+            <b>File → BMP To TMX → All Cells…</b> and
+            <b>File → Generate Lots 8x8 → All Cells…</b></span>
+        </details>
+      </div>
+      <button id="compileBtn" class="btn" disabled>Compile</button>
+      <button class="btn btn-stop" data-stop hidden>Stop</button>
+    </li>
+    <li class="pipe-card" data-step="install">
+      <div class="pipe-body">
+        <div class="pipe-title">6. Install</div>
+        <div class="install-row">
+          <label>Name in game <input type="text" id="mapTitle"/></label>
+          <label>Mod id <input type="text" id="modId"/></label>
+        </div>
+        <span id="installNote" class="step-note">Copies the map into your Zomboid mods folder.</span>
+        <!-- Everything a dedicated server needs, done rather than described:
+             the mod id added to Mods=, the map put at the front of Map= with
+             Muldraugh still at the back, and the spawn regions file named for
+             the server (knoxbuild/serverconf.py). -->
+        <div id="serverSetup" class="server-setup" hidden>
+          <div class="server-head">Play it with friends</div>
+          <p class="hint">Put this map on a dedicated server on this PC. It adds
+            what is missing to the server&rsquo;s own files and leaves the rest
+            alone, keeping a copy of the .ini first.</p>
+          <div class="sketch-actions">
+            <select id="serverPick" aria-label="Which server"></select>
+            <button type="button" id="serverSetupBtn" class="btn btn-small">Set it up</button>
+          </div>
+          <div id="serverNote" class="hint"></div>
+        </div>
+      </div>
+      <button id="installBtn" class="btn" disabled>Install</button>
+    </li>
+    <li class="pipe-card" data-step="publish" id="publishCard" hidden>
+      <div class="pipe-body">
+        <div class="pipe-title">Before you publish</div>
+        <span class="step-note">Checks the installed mod for the credit OpenStreetMap asks for,
+          a usable mod id and a preview picture. It uploads nothing.</span>
+        <div id="publishOut"></div>
+      </div>
+      <button id="publishCheckBtn" class="btn" type="button">Check</button>
+    </li>
+  </ol>
+</section>
+
+<!-- The drawing board: the editor's own screen, a blank sheet in metres
+     rather than a layer over the world. Everything on it becomes an ordinary
+     OSM feature before the generator sees it (generator/sketch.py). -->
+<div id="board" hidden>
+  <header class="board-bar">
+    <strong>Drawing board</strong>
+    <label class="board-size">Sheet
+      <input type="number" id="boardWidth" min="100" max="40000" step="50" value="900"> ×
+      <input type="number" id="boardHeight" min="100" max="40000" step="50" value="900"> m</label>
+    <label class="board-size">Name
+      <input type="text" id="boardName" placeholder="my_town" size="12"></label>
+    <span class="board-spacer"></span>
+    <span id="boardCount" class="hint"></span>
+    <button type="button" id="boardFitCells" class="btn" hidden
+            title="Round the sheet to whole 300-tile cells, so its edges are the map's edges">Fit to cells</button>
+    <button type="button" id="boardTrace" class="btn">Background image</button>
+    <input id="boardTraceFile" type="file" accept="image/*" hidden>
+    <label class="board-size" id="boardTraceFade" hidden>Fade
+      <input type="range" id="boardTraceOpacity" min="0.1" max="1" step="0.05"
+             value="0.55"></label>
+    <button type="button" id="boardTraceOff" class="btn" hidden>Remove image</button>
+    <span id="boardTools"></span>
+    <button type="button" id="boardSave" class="btn">Save</button>
+    <button type="button" id="boardBuild" class="btn btn-primary">Build this map</button>
+    <button type="button" id="boardClose" class="btn">Close</button>
+  </header>
+  <div class="board-body">
+    <aside class="board-tools">
+      <p class="hint">Click a tool, then click on the sheet to draw.
+        Double-click to finish a line or a shape. Click a thing to pick it:
+        Delete removes it, the arrow keys nudge it, Escape lets go.
+        Ctrl+Z undoes, Ctrl+Shift+Z redoes.</p>
+      <!-- A sheet that joins a map already built: the map next door is shown
+           beside it and the streets that reach their shared border are marked
+           on this sheet's edge, so a road drawn to one of them meets it. -->
+      <details id="boardJoinPanel">
+        <summary>Join a map you have built</summary>
+        <label class="board-side-row">Next to
+          <select id="boardJoin"><option value="">nothing - a map of its own</option></select>
+        </label>
+        <label class="board-side-row">This sheet is
+          <select id="boardJoinSide">
+            <option value="E">east of it</option>
+            <option value="W">west of it</option>
+            <option value="N">north of it</option>
+            <option value="S">south of it</option>
+          </select>
+        </label>
+        <button type="button" id="boardMatchEdge" class="btn" disabled>Match
+          its edge</button>
+        <p class="hint" id="boardJoinNote">Its streets are marked on the edge
+          they share with this sheet. Draw a road to one and it snaps onto it;
+          the map is put beside it in the world when it is built.</p>
+      </details>
+      <label class="check board-snap"><input type="checkbox" id="boardSnap" checked>
+        Snap to the streets it joins, and to what is already drawn</label>
+      <input type="search" id="boardFind" class="list-search" hidden
+             autocomplete="off" placeholder="Search what to draw">
+      <div id="boardPalette" class="sketch-palette"></div>
+      <div id="boardPicked" class="edit-selected" hidden></div>
+      <p class="hint" id="boardNote"></p>
+    </aside>
+    <div id="boardMap"></div>
+  </div>
+</div>
+
+<!-- The building editor: one building, drawn room by room, built by the same
+     code that builds the rest of the map (knoxbuild/designer.py). What is on
+     the plan is the finished building - its doors, windows and furniture -
+     not the rectangles that were drawn. -->
+<div id="builder" hidden>
+  <header class="board-bar">
+    <strong>Building editor</strong>
+    <label class="board-size">Name
+      <input type="text" id="bdName" placeholder="Oak Street Station" size="14"></label>
+    <label class="board-size">It is a
+      <select id="bdKind"></select></label>
+    <label class="board-size">Size
+      <input type="number" id="bdWidth" min="4" max="150" value="20"> ×
+      <input type="number" id="bdHeight" min="4" max="150" value="16"> tiles</label>
+    <label class="board-size">Storeys
+      <input type="number" id="bdStoreys" min="1" max="8" value="1"></label>
+    <label class="board-size">Walls
+      <select id="bdStyle"></select></label>
+    <span class="board-spacer"></span>
+    <button type="button" id="bdFill" class="btn">Lay it out for me</button>
+    <button type="button" id="bdCopyUp" class="btn"
+            title="Copy this floor onto the one above it">Copy floor up</button>
+    <button type="button" id="bdUndo" class="btn" disabled title="Ctrl+Z">Undo</button>
+    <button type="button" id="bdRedo" class="btn" disabled title="Ctrl+Shift+Z">Redo</button>
+    <button type="button" id="bdClear" class="btn">Clear</button>
+    <button type="button" id="bdSave" class="btn btn-primary">Save as preset</button>
+    <button type="button" id="bdClose" class="btn">Close</button>
+  </header>
+  <div class="board-body">
+    <aside class="board-tools">
+      <p class="hint">Pick a room, then drag across the plan to draw it.
+        Drawing over a room takes that much of it away; the eraser cuts the
+        shape of the building. To change a room you have already drawn, take
+        the adjust tool and drag its edge; a room you have taken hold of can then
+        be moved with the arrow keys, copied with Ctrl+D or removed with
+        Delete. Ctrl+Z undoes, Ctrl+Shift+Z redoes.</p>
+      <input type="search" id="bdFind" class="list-search" hidden
+             autocomplete="off" placeholder="Search the rooms">
+      <div id="bdRooms" class="sketch-palette"></div>
+    </aside>
+    <div class="builder-sheet">
+      <div class="builder-storeys"><span id="bdStoreyTabs" class="kd-bar"></span>
+        <span class="hint" id="bdHover"></span></div>
+      <div class="builder-plan" id="bdPlan">
+        <img id="bdImage" alt="The plan of this building">
+        <div id="bdSelBox" hidden></div>
+        <div id="bdDrag" hidden></div>
+        <p class="hint builder-empty" id="bdEmpty">Nothing drawn yet. Pick a
+          room and drag a rectangle, or let the generator lay one out for you
+          and change what it did.</p>
+      </div>
+      <p class="hint" id="bdNote"></p>
+    </div>
+    <aside class="board-side">
+      <h4>What this storey holds</h4>
+      <ul id="bdTally" class="builder-tally"></ul>
+      <h4>What it is built of</h4>
+      <ul id="bdTiles" class="builder-tiles"></ul>
+    </aside>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/vendor/leaflet-draw/leaflet.draw.js"></script>
+<script src="/static/js/fx.js"></script>
+<script src="/static/js/draw.js"></script>
+<script src="/static/js/settings.js"></script>
+<script src="/static/js/app.js"></script>
+<script src="/static/js/drawing_board.js"></script>
+<script src="/static/js/building_editor.js"></script>
+<script src="/static/js/placement.js"></script>
+<script src="/static/js/iso_view.js"></script>
+<script src="/static/js/road_inspector.js"></script>
+<script src="/static/js/shell.js"></script>
+<script src="/static/js/i18n.js"></script>
+</body>
+</html>

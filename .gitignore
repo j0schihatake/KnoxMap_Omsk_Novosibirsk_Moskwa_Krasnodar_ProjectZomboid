@@ -1,0 +1,10 @@
+.venv/
+vendor/
+cache/
+output/
+dist/
+logs/
+__pycache__/
+*.pyc
+knoxlots
+knoxroute

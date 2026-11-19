@@ -1,0 +1,332 @@
+"""Repoint WorldEd's Rules.txt at tree tiles Build 42 actually ships, in the
+sizes it ships them in, and add rules for the big trees.
+
+The shipped Rules.txt paints forests with `vegetation_trees_01_*` and flowers
+with `vegetation_groundcover_01_*`. Build 42 still *defines* those tiles in
+newtiledefinitions.tiles.txt, but ships no artwork for them: neither sheet
+appears in any of the game's 24 texture packs, and there is no loose PNG for
+them anywhere in the install. So BMP to TMX refuses to run - in the GUI as
+well as from the command line.
+
+Build 42's replacements are the per-species sheets (e_redmaple_1 and friends).
+Their index is not a free choice: of the 24 pictures on each sheet the game
+gives a tile definition to the first eight only, four sizes in two seasons,
+and it is that definition which carries `tree = 1..4` - the property that
+makes the thing a tree the game can grow, chop and blow about in the wind. An
+index past the eighth is a picture with no definition behind it: it draws, so
+nothing complains, and it is scenery. Every tree KnoxMap has ever placed was
+one of those (the first version of this script substituted index for index,
+and the old rules asked for 8 to 11), which is why its woods looked flat and
+why nothing in them could be felled.
+
+The sizes within a wood come from the rule: a dense wood is grown trees, and
+the sparse rules - a scrubby edge, a few trees over grass - keep the saplings
+and the half-grown ones.
+
+Then the big trees. These are the jumbo sheets, one tile each whose picture
+is several tiles across, and Build 42 leans on them hard: in the game's own
+maple forest a jumbo XL or XXL comes up about thirty times as often as a
+plain tree (media/lua/server/WorldGen/biomes/worldgen/maple_forest.lua), and
+Knox County's own cells carry 1800 big trees. KnoxMap placed none, so its
+woods and parks were all undergrowth - "big trees seem to almost never
+generate, leading to very disappointing results".
+
+The colours they answer to are in generator/pz_colors.py; the renderer plants
+them with a clear square around each, which is what the game's own tree
+features do (media/lua/server/WorldGen/features/tree/maple_jumbo*.lua).
+
+    python patch_rules_b42_trees.py <PZMappingTools dir>
+
+Safe to run again, and on a file an older version patched: trees already
+pointed at a picture with no definition are moved onto one that has.
+"""
+from __future__ import annotations
+
+import re
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import knoxpaths  # noqa: E402
+
+# The green one on each sheet. Deciduous sheets run bare, snowy, spring,
+# summer, autumn, late autumn; the evergreens have no seasons to run through.
+# Which of them is stored matters less than it looks - Knox County's own maps
+# store the bare variant in places - but the summer picture is right either
+# way, and is what its cells mostly carry.
+DECIDUOUS = ["e_redmaple_1", "e_americanlinden_1", "e_yellowwood_1",
+             "e_riverbirch_1", "e_dogwood_1", "e_easternredbud_1",
+             "e_cockspurhawthorn_1", "e_carolinasilverbell_1"]
+EVERGREEN = ["e_virginiapine_1", "e_canadianhemlock_1", "e_americanholly_1"]
+# What an ordinary wood is made of: every species, broadleaf and evergreen,
+# taken in turn so that every few trees one is an evergreen. A wood used to be
+# the broadleaves alone, two of them flowering pink, which read as a park
+# rather than a forest anywhere they did not grow.
+MIXED = ["e_redmaple_1", "e_virginiapine_1", "e_americanlinden_1",
+         "e_yellowwood_1", "e_canadianhemlock_1", "e_riverbirch_1",
+         "e_dogwood_1", "e_americanholly_1", "e_easternredbud_1",
+         "e_cockspurhawthorn_1", "e_carolinasilverbell_1"]
+assert sorted(MIXED) == sorted(DECIDUOUS + EVERGREEN)
+
+# Sizes 1/4 to 4/4 are the sheet's first four tiles; the game's own world
+# generator plants 2 and 3 as "a tree" and 0 and 1 as a sapling.
+SIZE_INDEX = {1: 0, 2: 1, 3: 2, 4: 3}
+
+# What sizes a rule's trees get, by what the rule is called. Dense woodland is
+# grown trees with the odd three-quarter one; the sparse rules are where a
+# sapling belongs.
+MIXES = {
+    "dense": (4, 3, 4, 4),
+    "mixed": (4, 3, 4, 2),
+    "light": (3, 2, 4, 1),
+}
+FLOWER_SHEET = "f_flowerbed_1"
+FLOWER_INDICES = [0, 1, 2, 3, 4, 5]
+
+# Rules.txt has no comment syntax - a "#" line makes WorldEd reject the whole
+# file - so our rules carry the marker in their labels, as the road ones do.
+MARKER = "KnoxMap tree"
+# A jumbo sheet is two columns, the left one Jumbo and the right Jumbo L, with
+# a row per season; the XL and XXL sheets are one row of seasons. 6 and 7 are
+# the summer pair, 3 the summer single, and 0 the evergreens' only green.
+TREE_RULES = [
+    # The other end of the scale: a young tree, quarter or half grown. The
+    # rules call for "a tree" and the size comes from the rule, so a park or a
+    # wood had nothing small in it until this colour existed.
+    ("Small tree", (255, 0, 4),
+     [f"{sp}_{SIZE_INDEX[size]}" for sp in DECIDUOUS + EVERGREEN
+      for size in (1, 2)]),
+    ("Big tree", (255, 0, 1),
+     [f"{sp[:-2]}JUMBO_1_{i}" for sp in DECIDUOUS for i in (6, 7)]
+     + [f"{sp[:-2]}JUMBO_1_0" for sp in EVERGREEN]),
+    ("Huge tree", (255, 0, 2),
+     [f"{sp[:-2]}JUMBOXL_1_3" for sp in DECIDUOUS]
+     + [f"{sp[:-2]}JUMBOXL_1_0" for sp in EVERGREEN]),
+    ("Giant tree", (255, 0, 3),
+     [f"{sp[:-2]}JUMBOXXL_1_3" for sp in DECIDUOUS]
+     + [f"{sp[:-2]}JUMBOXXL_1_0" for sp in EVERGREEN]),
+]
+
+
+def mix_for(label: str) -> tuple[int, ...]:
+    """Which size mix a rule's trees take, from the rule's own name."""
+    name = label.lower()
+    if "sparse" in name or "few" in name:
+        return MIXES["light"]
+    if "dense" in name or name == "trees":
+        return MIXES["dense"]
+    return MIXES["mixed"]
+
+
+def sheet_sizes(tilesets_txt: Path) -> dict[str, tuple[int, int]]:
+    out, name = {}, None
+    if not tilesets_txt.is_file():
+        return out
+    for raw in tilesets_txt.read_text(encoding="utf-8", errors="replace").splitlines():
+        s = raw.strip()
+        if s.startswith("file = "):
+            name = s[7:].split("/")[-1]
+        elif s.startswith("size = ") and name:
+            c, r = s[7:].split(",")
+            out[name] = (int(c), int(r))
+            name = None
+    return out
+
+
+def rewrite_trees(text: str, available_deciduous: list[str] | None = None,
+                  available_evergreen: list[str] | None = None) -> tuple[str, int]:
+    """Point every tree entry at a tile the game defines as a tree, and give
+    every wood every species.
+
+    WorldEd picks one entry of a rule's list at random, so a rule's density is
+    its share of tree entries among the grass ones, and its species are only
+    the trees it lists. A rule held four trees, so dealing species out one per
+    slot gave each wood four of them. Here each tree slot becomes one entry per
+    species, at that slot's size, and every other entry is repeated as many
+    times: the share of trees is what it was and every species is in it.
+
+    The list is first brought back to its smallest form (every count divided
+    by their common factor), so an install patched by any earlier version -
+    shipped names, scenery indices, four species a rule - comes out the same,
+    and running it again changes nothing. Our own rules are rewritten whole
+    later and left alone here; the big trees' sheets (e_...JUMBO...) are never
+    matched.
+    """
+    from functools import reduce
+    from math import gcd
+
+    decid = available_deciduous if available_deciduous else DECIDUOUS
+    ever = available_evergreen if available_evergreen else EVERGREEN
+    # A wood takes every species this install has, in MIXED's order.
+    mixed = [sheet for sheet in MIXED if sheet in decid or sheet in ever]
+    tree = re.compile(r"^(?:vegetation_trees_01_\d+|e_[a-z]+_1_\d+)$")
+    count = {"n": 0}
+
+    def rewrite_block(block: re.Match) -> str:
+        body = block.group(0)
+        label = re.search(r"label = (.*)", body)
+        label = label.group(1).strip() if label else ""
+        if label.startswith(MARKER):
+            return body
+        tiles = re.search(r"(tiles = \[\n)(.*?)(\n\s*\])", body, re.S)
+        if not tiles:
+            return body
+        entries = [e.strip() for e in tiles.group(2).splitlines() if e.strip()]
+        trees = sum(1 for e in entries if tree.match(e))
+        if not trees:
+            return body
+        others: dict[str, int] = {}
+        for e in entries:
+            if not tree.match(e):
+                others[e] = others.get(e, 0) + 1
+        factor = reduce(gcd, [trees, *others.values()])
+        species = ever if "fir" in label.lower() else mixed
+        mix = mix_for(label)
+        out = []
+        for slot in range(trees // factor):
+            size = SIZE_INDEX[mix[slot % len(mix)]]
+            out += [f"{sheet}_{size}" for sheet in species]
+        for entry, n in others.items():
+            out += [entry] * (n // factor * len(species))
+        count["n"] += len(out) - sum(others.values()) // factor * len(species)
+        listed = "\n".join(f"        {e}" for e in out)
+        return body[:tiles.start(2)] + listed + body[tiles.end(2):]
+
+    return re.sub(r"rule\s*\n\{.*?\n\}", rewrite_block, text, flags=re.S), count["n"]
+
+
+def main(argv: list[str]) -> int:
+    root = Path(argv[1] if len(argv) > 1 else ".")
+    cfg = root / "config"
+    rules = cfg / "Rules.txt"
+    tiles_dir = root / "Tiles" / "2x"
+    if not rules.is_file():
+        print(f"Rules.txt not found under {cfg}", file=sys.stderr)
+        return 2
+
+    sizes = sheet_sizes(cfg / "Tilesets.txt")
+
+    # Every sheet named must exist on disk and be big enough for the indices
+    # about to be referenced, or WorldEd rejects the whole file.
+    def unusable(tile: str) -> str:
+        sheet, _, index = tile.rpartition("_")
+        if not (tiles_dir / f"{sheet}.png").exists():
+            return f"{sheet}: PNG not extracted"
+        cols, rows = sizes.get(sheet, (0, 0))
+        if cols and int(index) >= cols * rows:
+            return f"{sheet}: index {index} outside {cols}x{rows}"
+        return ""
+
+    needed = [f"{sheet}_{max(SIZE_INDEX.values())}" for sheet in DECIDUOUS + EVERGREEN]
+    needed.append(f"{FLOWER_SHEET}_{max(FLOWER_INDICES)}")
+
+    # Check for Build 41 vs Build 42 diagnosis:
+    has_any_b42_tree = any(not unusable(f"{sheet}_{max(SIZE_INDEX.values())}") for sheet in DECIDUOUS + EVERGREEN)
+    if not has_any_b42_tree:
+        has_b41_trees = (tiles_dir / "vegetation_trees_01.png").exists()
+        if has_b41_trees:
+            print("refusing to patch: none of the Build 42 tree sheets (e_redmaple_1, etc.) were found,",
+                  "but legacy vegetation_trees_01 was found. Your Project Zomboid install appears to be Build 41.",
+                  "KnoxMap requires Build 42: switch to the Build 42 beta branch in Steam (Properties > Betas)",
+                  "and run Setup.bat again.", sep="\n  ", file=sys.stderr)
+        else:
+            print("refusing to patch: no Build 42 tree sheets were found in the tile folder.",
+                  "Tile extraction may have been skipped or failed. Run Setup.bat with your Project Zomboid",
+                  "folder located so tiles can be extracted from your game.", sep="\n  ", file=sys.stderr)
+        return 3
+
+    avail_decid = [sheet for sheet in DECIDUOUS if not unusable(f"{sheet}_{max(SIZE_INDEX.values())}")]
+    avail_ever = [sheet for sheet in EVERGREEN if not unusable(f"{sheet}_{max(SIZE_INDEX.values())}")]
+    if not avail_decid or not avail_ever:
+        problems = [bad for bad in map(unusable, needed) if bad]
+        print("refusing to patch: need at least one deciduous and one evergreen tree sheet:",
+              *problems, sep="\n  ", file=sys.stderr)
+        return 3
+
+    missing_trees = [bad for bad in map(unusable, needed) if bad]
+    if missing_trees:
+        print(f"note: {len(missing_trees)} tree sheets missing or incomplete; patching with the {len(avail_decid) + len(avail_ever)} available sheets")
+
+    # A tree whose sheet this install has not got is left out on its own,
+    # rather than costing the other rules their fix as well.
+    ours, left_out = [], []
+    for label, colour, tiles in TREE_RULES:
+        keep = [t for t in tiles if not unusable(t)]
+        left_out += [t for t in tiles if t not in keep]
+        if keep:
+            ours.append((label, colour, keep))
+
+    text = rules.read_text(encoding="utf-8", errors="replace")
+    before = text
+    if "vegetation_trees_01" in text:
+        backup = rules.with_suffix(".txt.pre-b42")
+        if not backup.exists():
+            shutil.copy2(rules, backup)
+            print(f"backed up to {backup.name}")
+
+    text, n_trees = rewrite_trees(text, available_deciduous=avail_decid, available_evergreen=avail_ever)
+
+    flower_counter = {"n": 0}
+
+    def swap_flower(_m: re.Match) -> str:
+        idx = FLOWER_INDICES[flower_counter["n"] % len(FLOWER_INDICES)]
+        flower_counter["n"] += 1
+        return f"{FLOWER_SHEET}_{idx}"
+
+    if not unusable(f"{FLOWER_SHEET}_{max(FLOWER_INDICES)}"):
+        text, n_flowers = re.subn(r"vegetation_groundcover_01_\d+", swap_flower, text)
+    else:
+        n_flowers = 0
+
+    # Our own rules, rewritten whole, so a changed tile reaches an install
+    # patched by an older version.
+    old = len(re.findall(rf"label = {MARKER} ", text))
+    blocks = []
+    for label, (r, g, b), tiles in ours:
+        listed = "".join(f"        {t}\n" for t in tiles)
+        blocks.append("rule\n{\n"
+                      f"    label = {MARKER} {label}\n"
+                      "    bitmap = 1\n"
+                      f"    color = {r} {g} {b}\n"
+                      f"    tiles = [\n{listed}    ]\n"
+                      "    layer = 0_Vegetation\n"
+                      "}\n")
+    # Laid where the last run put them, not appended: Setup runs this before
+    # the roads patcher, and appending made the two take turns being last, so
+    # Rules.txt changed on every setup and every incremental compile with it.
+    text = knoxpaths.lay_rule_blocks(text, MARKER, blocks)
+
+    if text == before:
+        print("trees already up to date")
+        return _finish(root)
+    rules.write_text(text, encoding="utf-8")
+    print(f"tree tiles repointed  : {n_trees} across "
+          f"{len(MIXED)} species and {len(SIZE_INDEX)} sizes")
+    print(f"tree rules written    : {len(blocks)} (replacing {old})")
+    if left_out:
+        print(f"    left out {len(left_out)} trees this install has no "
+              f"sheet for: {', '.join(sorted(set(left_out))[:4])}")
+    print(f"flower tiles repointed: {n_flowers} -> {FLOWER_SHEET}")
+    print(f"wrote {rules}")
+    return _finish(root)
+
+
+def _finish(root: Path) -> int:
+    """0 when the file is what the window's setup card asks for, else 3.
+
+    The same question, from the same place (knoxpaths.tree_rules_ok), so Setup
+    can trust this exit code. It used to be 0 for a run that wrote nothing -
+    the jumbo sheets not extracted yet, say - which meant Setup reported success
+    while the card stayed red, with nothing anywhere saying why.
+    """
+    if knoxpaths.tree_rules_ok(root):
+        return 0
+    print("the tree rules are still not the ones the map tools need: KnoxMap's "
+          "rules are missing or a tree still stands on a picture the game does "
+          "not define as one", file=sys.stderr)
+    return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

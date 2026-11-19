@@ -1,0 +1,13 @@
+{
+  "10": {"name": "Tree cover", "ground": "forest", "behaviour": "a wood, through the same pass as mapped forest (Woodland and Forests)"},
+  "20": {"name": "Shrubland", "ground": "grass", "behaviour": "clumped bushes and young trees"},
+  "30": {"name": "Grassland", "ground": "meadow", "behaviour": "grass tufts and the odd bush"},
+  "40": {"name": "Cropland", "ground": "farmland", "behaviour": "field plots: furrows, corn, fallow, some hedgerows"},
+  "50": {"name": "Built-up", "ground": "grass", "behaviour": "lawn; OSM's roads and buildings stand on it"},
+  "60": {"name": "Bare / sparse vegetation", "ground": "dirt", "behaviour": "dirt with low rocks in clumps and a few boulders"},
+  "70": {"name": "Snow and ice", "ground": "sand", "behaviour": "sand-coloured ground (no snow tile)"},
+  "80": {"name": "Permanent water bodies", "ground": "water", "behaviour": "water only where OSM has no water polygon"},
+  "90": {"name": "Herbaceous wetland", "ground": "marsh", "behaviour": "dense marsh, the odd stunted tree, open-water pools"},
+  "95": {"name": "Mangroves", "ground": "marsh", "behaviour": "dense marsh, the odd stunted tree, open-water pools"},
+  "100": {"name": "Moss and lichen", "ground": "tundra", "behaviour": "dirt and moss patches, low rocks in clumps, boulders, no trees"}
+}

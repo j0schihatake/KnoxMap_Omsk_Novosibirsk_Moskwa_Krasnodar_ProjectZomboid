@@ -1,0 +1,897 @@
+"""Making a map: generate, the pictures, buildings and zombies steps, the layout preview
+and handing a map to WorldEd.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import shutil
+import sys
+import threading
+import time
+from pathlib import Path
+
+from flask import Blueprint, jsonify, make_response, request, send_file
+
+import knoxfiles
+import knoxlog
+import knoxstop
+from generator import edits as mapedits
+from generator import osm, renderer, sketch
+from generator.rendering.forest_params import ForestParams
+from knoxbuild import mapstate
+from knoxbuild.settings import Settings
+
+from web import common
+from web.checks import (BASE_BYTES, BIG_AREA_KM2, BIG_TILES_PER_SIDE,
+                        BUILD_BASE_BYTES, BUILD_BYTES_PER_TILE, BYTES_PER_TILE,
+                        MAX_METERS_PER_TILE, MIN_METERS_PER_TILE,
+                        OVERPASS_TILE_KM2, USUAL_METERS_PER_TILE,
+                        _beyond_this_pc, _clean_shape, _normalise_bbox,
+                        _shape_rings, _too_big_for_memory, tidy_scale)
+from web.common import (SAFE_NAME, _bbox_area_km2, _cos_lat, _json_body,
+                        _map_dir, _worlded_exe, failed, log)
+from web.jobs import _PROGRESS_LOCK, _hold, _set_progress, _stopped, _stopper
+from web.mapfiles import (_audited, _load_edits, _load_settings, _load_sketch,
+                          _map_summary, _osm_cache_for, _population,
+                          _save_design, _save_settings, _save_sketch)
+
+bp = Blueprint("generation", __name__)
+
+
+def _sketch_signature(drawn) -> str:
+    return hashlib.sha256(json.dumps(drawn, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+@bp.route("/api/generate", methods=["POST"])
+def generate():
+    return _generate(_json_body())
+
+
+@bp.route("/api/forecast", methods=["POST"])
+def api_forecast():
+    """How long this area will take, from how long the last maps did.
+
+    Asked before Generate, so it comes with the area in the request rather than
+    reading a map that does not exist yet. Nothing here refuses anything: the
+    size checks already do that, and this is the answer to "can I do this
+    tonight?".
+    """
+    from web.forecast import forecast
+
+    data = _json_body()
+    try:
+        south, west, north, east = (float(data["south"]), float(data["west"]),
+                                    float(data["north"]), float(data["east"]))
+        meters_per_tile = float(data.get("metersPerTile") or 1.0)
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Draw an area first."}), 400
+    (south, west, north, east), why = _normalise_bbox(south, west, north, east)
+    if why:
+        return jsonify({"error": why}), 400
+    map_name = str(data.get("mapName") or "").strip()
+    map_dir = (common.OUTPUT_DIR / map_name) if map_name and "/" not in map_name and "\\" not in map_name else None
+    return jsonify(forecast(common.OUTPUT_DIR, south, west, north, east,
+                            tidy_scale(meters_per_tile),
+                            map_dir=map_dir if map_dir and map_dir.is_dir() else None))
+
+
+def _fetch_landcover(knoxdata, settings, bbox, map_name) -> None:
+    """Download the WorldCover tiles this map needs, if they are not cached.
+
+    The other layers apply only what is already on disk, but without this
+    one the ground is a guess, and nothing else in the app fetches it. A
+    3-degree tile is 20-120 MB, once; after that every map on it is offline.
+    A failed download is logged and the map is built without it."""
+    source = knoxdata.sources().get("worldcover")
+    if (source is None or not source.enabled(settings)
+            or not source.available(bbox) or source.cached(bbox)):
+        return
+
+    def progress(done, total):
+        mb = f"{done / 1e6:.0f} of {total / 1e6:.0f} MB" if total else f"{done / 1e6:.0f} MB"
+        _set_progress(map_name, stage="osm", done=done, total=total or 0,
+                      note=f"Downloading land cover (ESA WorldCover, once per area) - {mb}")
+
+    progress(0, 0)
+    try:
+        source.fetch(tuple(bbox), progress_cb=progress)
+        log.info("generate %s: fetched WorldCover", map_name)
+    except Exception as exc:             # noqa: BLE001 - optional, never fatal
+        log.warning("generate %s: WorldCover download failed - %s: %s",
+                    map_name, type(exc).__name__, exc)
+
+
+def _generate(data):
+    # A map drawn on the editor's own sheet brings its own size and its own
+    # corner of the world; the box and the features both come out of it, so
+    # there is nothing to draw on the world map and nothing to download.
+    design = data.get("design")
+    if isinstance(design, dict):
+        south, west, north, east = sketch.design_bbox(design)
+        data = {**data, "south": south, "west": west, "north": north,
+                "east": east, "shape": None, "drawnOnly": True,
+                "sketch": sketch.design_to_drawn(design)}
+    shape, problem = _clean_shape(data.get("shape"))
+    if problem:
+        return jsonify({"error": problem}), 400
+    if shape:
+        # A drawn shape decides the box: its own bounds, whatever the page sent.
+        lons = [p[0] for ring in _shape_rings(shape) for p in ring]
+        lats = [p[1] for ring in _shape_rings(shape) for p in ring]
+        data = {**data, "south": min(lats), "north": max(lats),
+                "west": min(lons), "east": max(lons)}
+    try:
+        south = float(data["south"])
+        west = float(data["west"])
+        north = float(data["north"])
+        east = float(data["east"])
+        meters_per_tile = float(data.get("metersPerTile", 1.0))
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid bbox / scale."}), 400
+
+    import math
+    if not all(math.isfinite(v) for v in (south, west, north, east, meters_per_tile)):
+        return jsonify({"error": "Missing or invalid bbox / scale."}), 400
+    (south, west, north, east), problem = _normalise_bbox(
+        south, west, north, east)
+    if problem:
+        return jsonify({"error": problem}), 400
+    if not (MIN_METERS_PER_TILE <= meters_per_tile <= MAX_METERS_PER_TILE):
+        return jsonify({"error": f"Metres per tile has to be a whole number "
+                                 f"between {MIN_METERS_PER_TILE:g} and "
+                                 f"{MAX_METERS_PER_TILE:g}."}), 400
+    # Whole metres only: 1.5 would put every building, road and lot on a grid
+    # that is not a multiple of the survey's own.
+    meters_per_tile = tidy_scale(meters_per_tile)
+
+    # Nothing below refuses the map. These are what the window has already
+    # warned about; they are logged here so a report from somebody whose map
+    # died halfway says how big it was.
+    heavy: list[str] = []
+    area_km2 = _bbox_area_km2(south, west, north, east)
+    if area_km2 > BIG_AREA_KM2:
+        heavy.append(f"{area_km2:.0f} km2, over the {BIG_AREA_KM2:g} km2 a map "
+                     f"usually is")
+    if not (USUAL_METERS_PER_TILE[0] <= meters_per_tile <= USUAL_METERS_PER_TILE[1]):
+        heavy.append(f"{meters_per_tile:g} m a tile, outside the "
+                     f"{USUAL_METERS_PER_TILE[0]:g}-{USUAL_METERS_PER_TILE[1]:g} "
+                     f"the window offers")
+
+    raw_name = data.get("mapName")
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raw_name = f"knoxmap_{int(time.time())}"
+    map_name = SAFE_NAME.sub("_", raw_name).strip("_") or f"knoxmap_{int(time.time())}"
+
+    # Upper bound on the final bitmap size before we even hit Overpass.
+    approx_w = ((east - west) * 111320 * _cos_lat((south + north) / 2)) / meters_per_tile
+    approx_h = ((north - south) * 111320) / meters_per_tile
+    if max(approx_w, approx_h) > BIG_TILES_PER_SIDE:
+        heavy.append(f"{int(approx_w)}x{int(approx_h)} tiles, over the "
+                     f"{BIG_TILES_PER_SIDE} a side that is comfortable")
+    # The one size that is refused: WorldEd cannot compile it, so a map this big
+    # would be made over most of an hour and then fail at the compile.
+    from tools.compile_map import WORLDED_MAX_PIXELS, bitmap_pixels, default_backend, scale_that_fits
+    pixels = bitmap_pixels(int(approx_w), int(approx_h))
+    if pixels > WORLDED_MAX_PIXELS and default_backend() != "rust":
+        fits = scale_that_fits(int(approx_w), int(approx_h), meters_per_tile)
+        return jsonify({"error": (
+            f"That map would be about {int(approx_w)} x {int(approx_h)} tiles "
+            f"({pixels / 1e6:.0f} million), and WorldEd cannot compile a map past "
+            f"{WORLDED_MAX_PIXELS / 1e6:.0f} million. "
+            + (f"At {fits} m a tile it fits, or draw a smaller area."
+               if fits else "Draw a smaller area."))}), 400
+    tight = _too_big_for_memory(approx_w, approx_h)
+    if tight:
+        heavy.append(tight)
+    impossible = _beyond_this_pc(approx_w, approx_h)
+    if impossible:
+        return jsonify({"error": impossible}), 400
+    if heavy:
+        log.warning("generate %s: going ahead with a heavy map - %s",
+                    map_name, "; ".join(heavy))
+
+    t0 = time.time()
+    log.info("generate %s: %.5f,%.5f,%.5f,%.5f at %s m/tile, %.2f km2", map_name,
+             south, west, north, east, meters_per_tile, area_km2)
+    map_dir = common.OUTPUT_DIR / map_name
+    # A folder this request makes is taken away again if the download fails: it
+    # holds nothing but the settings, and every failed attempt left one behind.
+    made_here = not map_dir.exists()
+    map_dir.mkdir(parents=True, exist_ok=True)
+    busy = _hold(map_dir, "generated")
+    if busy is not None:
+        return busy
+
+    drawing_saved = False
+
+    def forget_empty_folder() -> None:
+        if made_here and not drawing_saved and not (map_dir / f"{map_name}_info.json").exists():
+            shutil.rmtree(map_dir, ignore_errors=True)
+
+    bbox = (south, west, north, east)
+    # Remembered next to the map, so Generate buildings and any later rebuild
+    # use the same ones without the page having to send them again - and so a
+    # map from last week can be reproduced exactly.
+    settings = Settings.from_dict(data.get("settings"))
+    try:
+        _save_settings(map_dir, settings)
+    except OSError as exc:
+        forget_empty_folder()
+        return failed(f"Could not save this map's settings: {exc}.", 500, exc)
+
+    # The drawn map, kept beside the real one. The page sends it when there is
+    # one; when there is not, whatever was drawn for this map last time is used
+    # again, so Generate map twice over does not quietly lose it.
+    try:
+        if isinstance(design, dict):
+            _save_design(map_dir, design)
+        drawn = data.get("sketch")
+        if drawn is None:
+            drawn = _load_sketch(map_dir)
+        else:
+            _save_sketch(map_dir, drawn)
+        drawing_saved = isinstance(design, dict) or bool(
+            drawn.get("features") if isinstance(drawn, dict) else False)
+    except OSError as exc:
+        return failed(f"Could not save this map's drawing: {exc}.", 500, exc)
+    drawn_only = bool(data.get("drawnOnly"))
+
+    # What to download. A map turned to its street grid (see
+    # renderer.dominant_road_angle) reaches past the drawn box at its corners,
+    # and the angle is only known once the streets are in. This used to fetch
+    # the box, measure the angle, then fetch the turned map's bounds as well -
+    # the same town twice over, about 2.4 times the data. Now one download
+    # covers the map at any angle: the circle round it, as a box.
+    cache, fetch_box = _osm_cache_for(map_dir, bbox, meters_per_tile, settings)
+
+    # Regenerating the same area is the common case - it is how a map gets
+    # re-rendered after the ground or road rules change - and a town's worth of
+    # Overpass tiles takes minutes to download every time. The reply is kept on
+    # disk and reused whenever the bbox matches to the metre.
+    # A map drawn by hand has no town behind it to download. Overpass is not
+    # asked at all, which is also the only way to make a map of a place that
+    # is not on OpenStreetMap - one never surveyed, or one that does not exist.
+    features = [] if drawn_only else osm.load_cache(cache, fetch_box)
+    if features is None:
+        _set_progress(map_name, stage="osm", done=0, total=1)
+        def _progress(i, total, note=""):
+            _set_progress(map_name, stage="osm", done=max(0, i - 1), total=total,
+                          note=note)
+
+        try:
+            # Always through the tiled path, even for a small area: with one
+            # tile it is the same single request, and it brings the retry that
+            # quarters a bbox the servers call too heavy.
+            features = osm.fetch_features_tiled(
+                *fetch_box, max_tile_km2=OVERPASS_TILE_KM2, progress=_progress,
+                should_stop=_stopper(map_name))
+        except knoxstop.Stopped:
+            forget_empty_folder()
+            return _stopped(map_name, "generate")
+        except Exception as exc:  # Overpass can be flaky — surface that clearly
+            message = osm.explain(exc)
+            _set_progress(map_name, stage="error", message=message)
+            forget_empty_folder()
+            return failed(message, 502, exc)
+        try:
+            osm.save_cache(cache, fetch_box, features)
+        except OSError:
+            pass  # a map that cannot be cached still renders
+
+    # Buildings Overture has and OpenStreetMap has not, before anything is
+    # measured from them: they are ordinary building features from here on,
+    # so the street angle, the ground, the gardens and the .tbx all see them
+    # exactly as they see a mapped one (generator/overture.py).
+    gaps = {"added": 0}
+    if settings.fill_gaps and not settings.terrain_only:
+        from generator import msbuildings, overture
+        _set_progress(map_name, stage="overture", done=0, total=1)
+        # Microsoft's files first: plain downloads, nothing to install. Overture
+        # (DuckDB) only if they cannot be reached.
+        source = "Microsoft's footprints"
+        try:
+            try:
+                features, gaps = msbuildings.add_missing(
+                    features, fetch_box, str(map_dir), map_name,
+                    should_stop=_stopper(map_name))
+            except knoxstop.Stopped:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.warning("microsoft buildings %s: %s", map_name, exc)
+                source = "Overture Maps"
+                features, gaps = overture.add_missing(
+                    features, fetch_box, str(map_dir), map_name,
+                    should_stop=_stopper(map_name))
+        except knoxstop.Stopped:
+            return _stopped(map_name, "generate")
+        except Exception as exc:  # noqa: BLE001 - OSM alone still makes a map
+            log.warning("overture %s: %s", map_name, exc)
+            gaps = {"added": 0, "error": str(exc)}
+        if gaps.get("added"):
+            log.info("fill gaps %s: %d buildings OSM had not got, from %d fetched (%s)",
+                     map_name, gaps["added"], gaps.get("fetched", 0), source)
+        else:
+            # A town that came out empty is the report KnoxMap gets most, and
+            # this used to end in "0 from Overture" whether the package that
+            # reads it was missing, the download failed, or OpenStreetMap
+            # already had every roof in the box - the one case that needs
+            # nothing done about it. The window says this beside the finished
+            # map, and offers the install when a missing package is the reason
+            # (the reply's `gapFillWhy`, web/system.py's /api/install-optional).
+            roofs = gaps.get("fetched", 0)
+            if gaps.get("error") or gaps.get("why"):
+                gaps["why"] = gaps.get("error") or gaps.get("why")
+            elif roofs:
+                gaps["why"] = (f"{source} had {roofs} roof{'s' if roofs != 1 else ''} here "
+                               "and OpenStreetMap already had every one of them")
+            else:
+                gaps["why"] = (f"{source} had nothing here, so OpenStreetMap's own "
+                               "buildings are all there is")
+            log.warning("fill gaps %s: nothing added - %s", map_name, gaps["why"])
+
+    # What the mapper drew, on top of whatever came down. It goes in here, with
+    # the real features and before a single thing is measured from them, so the
+    # street angle, the ground, the gardens, the buildings and the compiled
+    # cells all see a drawn street exactly as they see a surveyed one.
+    # What the mapper changed about the features themselves - a building
+    # removed, a road dragged straight, a house retagged as a shop. Applied
+    # here so nothing downstream ever sees the version that was rejected.
+    changes = _load_edits(map_dir)
+    if mapedits.count(changes):
+        features, used = mapedits.apply(features, changes)
+        log.info("generate %s: %d removed, %d moved, %d retagged by hand",
+                 map_name, used["removed"], used["moved"], used["tags"])
+
+    features = osm.proposed_roads(features, settings.include_proposed_roads)
+    drawn_features = sketch.features(drawn)
+    if drawn_features:
+        features = list(features) + drawn_features
+        log.info("generate %s: %d drawn features%s", map_name,
+                 len(drawn_features), " (drawn map)" if drawn_only else "")
+
+    rotation = 0.0
+    if settings.align_streets:
+        angle, strength = renderer.dominant_road_angle(features, *bbox)
+        if strength >= renderer.ALIGN_MIN_STRENGTH and abs(angle) >= 0.5:
+            rotation = -angle
+    # And whatever turn the mapper asked for on top of that.
+    rotation += float(settings.rotate_degrees)
+    osm_cache_name = Path(cache).name
+    osm_bbox = fetch_box
+
+    layers = None
+    landcover_for = None
+    suggested_preset = None
+    try:
+        import knoxdata
+        from knoxdata import cache as layer_cache
+        from knoxdata.worldcover import suggest_preset
+        # Read here so RENDER_SETTINGS can tell a changed knob needs a redraw.
+        layer_knobs = {
+            "landcover": settings.landcover, "elevation": settings.elevation,
+            "max_relief": settings.max_relief, "ne_context": settings.ne_context,
+            "region_override": settings.region_override,
+            "hospitals": settings.hospitals,
+            "hospitals_place_missing": settings.hospitals_place_missing,
+            "climate_flavor": settings.climate_flavor,
+            "winter_look": settings.winter_look,
+        }
+        layers = knoxdata.MapContext(
+            bbox=(south, west, north, east), settings=settings,
+            map_dir=map_dir, map_name=map_name, features=features)
+        # The map image runs past the bbox to whole cells, turned with the
+        # map: fetch every WorldCover tile under it, not only the bbox's.
+        try:
+            from generator.rendering.projection import Projector
+            extent = Projector.build(south, west, north, east, meters_per_tile,
+                                     rotation).latlon_bbox()
+        except Exception:                # noqa: BLE001
+            extent = (south, west, north, east)
+        _fetch_landcover(knoxdata, settings, extent, map_name)
+        report = knoxdata.run_layers(settings, (south, west, north, east), map_dir,
+                                     map_name=map_name, features=features,
+                                     ctx=layers, require_cache=True)
+        if report.get("used"):
+            log.info("generate %s: data layers used %s", map_name,
+                     ", ".join(report["used"]))
+        landcover_for = knoxdata.landcover_for(settings, (south, west, north, east))
+        fractions = (report.get("worldcover") or {}).get("fractions") or {}
+        if fractions:
+            suggested_preset = suggest_preset(fractions)
+        layer_cache.write_json(map_dir / f"{map_name}_knoxdata.json", {
+            "used": report.get("used", []),
+            "region": layers.region,
+            "climate": layers.climate,
+            "landcover": fractions,
+            "suggestedPreset": suggested_preset,
+            "knobs": layer_knobs,
+        })
+    except Exception as exc:             # noqa: BLE001 - optional, never fatal
+        log.warning("generate %s: data layers skipped - %s: %s", map_name,
+                    type(exc).__name__, exc)
+
+    osm_time = time.time() - t0
+    # Both vanilla layouts can use the native road search.
+    from generator.roadgraph import rustsearch
+    native_ok = rustsearch.available()
+    slow_roads = int(settings.straight_roads) in renderer.ROAD_LAYOUTS and not native_ok
+    if slow_roads:
+        log.warning("generate %s: the road router (knoxroute) was not found - routing the "
+                    "roads in Python, which is far slower", map_name)
+    from web import forecast
+    est_render = None
+    try:
+        gen_rate = forecast.rates(map_dir.parent).get("generate")
+        if gen_rate:
+            est_render = max(10, int(round(gen_rate * approx_w * approx_h - osm_time)))
+    except Exception:                    # noqa: BLE001 - optional forecast
+        est_render = None
+    _set_progress(map_name, stage="render", features=len(features),
+                  slowRoads=slow_roads, nativeAccelerated=native_ok,
+                  **({"estimatedSeconds": est_render} if est_render else {}))
+    t_render_start = time.time()
+    render_stage = "chunks" if (approx_w // 300) * (approx_h // 300) > 144 else "roads"
+
+    try:
+        result = renderer.render(
+            features, south, west, north, east,
+            meters_per_tile=meters_per_tile,
+            output_dir=str(map_dir),
+            map_name=map_name,
+            spawn_density=settings.spawn_density,
+            tree_density=settings.tree_density,
+            forest_density=settings.forest_density,
+            forest_params=ForestParams(
+                stand_m=settings.forest_stand_m, edge_m=settings.forest_edge_m,
+                thickets=settings.forest_thickets,
+                stand_variety=settings.forest_stand_variety,
+                raggedness=settings.forest_raggedness,
+                edge_wobble=settings.forest_edge_wobble,
+                spill_thick=settings.forest_spill_thick,
+                keep_meadows=settings.forest_keep_meadows,
+                seed=settings.forest_seed,
+                house_clearing_m=settings.forest_house_clearing_m,
+                big_trees=settings.forest_big_trees,
+                groves=settings.forest_groves,
+                wild_growth=settings.forest_wild_growth,
+                shrubland=settings.forest_shrubland),
+            rotation=rotation,
+            osm_cache=osm_cache_name,
+            osm_bbox=osm_bbox,
+            shape=shape,
+            straight_roads=int(settings.straight_roads),
+            include_proposed_roads=int(settings.include_proposed_roads),
+            fill_frontage=int(settings.fill_frontage),
+            terrain_only=int(settings.terrain_only),
+            landcover_for=landcover_for,
+            climate=(layers.climate if layers else None),
+            winter_look=settings.winter_look,
+            elevation=(layers.elevation if layers else None),
+            elevation_span=((layers.report.get("elevation_3dep") or {}).get("span_m")
+                            if layers else None),
+            should_stop=_stopper(map_name),
+            progress=lambda done, total: _set_progress(map_name, stage=render_stage, done=done, total=total),
+            render_progress=lambda frac, note=None: _set_progress(
+                map_name, stage="render", fraction=frac, note=note),
+        )
+    except knoxstop.Stopped:
+        return _stopped(map_name, "generate")
+    except MemoryError:
+        # Nothing refuses a big map any more, so this is where one that really
+        # was too big lands. Say what it would have taken rather than a
+        # traceback: the numbers are the ones the window already showed.
+        need = approx_w * approx_h * BYTES_PER_TILE + BASE_BYTES
+        _set_progress(map_name, stage="error", message="ran out of memory")
+        return failed(
+            f"The map ran out of memory while it was being drawn. It needs about "
+            f"{need / 1e9:.1f} GB for the ground and the greenery alone, at "
+            f"{int(approx_w)}x{int(approx_h)} tiles. Close a few things and try "
+            f"again, or draw it at a larger scale - 2 m a tile is a quarter of "
+            f"the memory of 1 m. Everything downloaded is kept, so a second run "
+            f"starts from the OpenStreetMap data already on disk.", 507)
+
+    render_time = time.time() - t_render_start
+    total_time = time.time() - t0
+    _write_readme(map_dir, map_name, result)
+    _set_progress(map_name, stage="done")
+    mapstate.stamp(str(map_dir), "generate", took=total_time)
+    from_addresses = 0
+    try:
+        with open(map_dir / f"{map_name}_info.json", encoding="utf-8") as f:
+            applied = json.load(f)
+        from_addresses = applied.get("houses_from_addresses", 0)
+        applied["sketch_hash"] = _sketch_signature(drawn)
+        applied["drawn_only"] = drawn_only
+        applied["houses_infilled"] = int(gaps.get("added", 0))
+        knoxfiles.write(str(map_dir / f"{map_name}_info.json"), applied)
+    except (OSError, ValueError):
+        pass
+    log.info("generate %s: done, %d features, %dx%d tiles, rotation %.1f, "
+             "%d houses from addresses, %d from gap fill, %.1fs (download %.1fs)",
+             map_name, len(features), result.width, result.height, rotation,
+             from_addresses, gaps.get("added", 0), time.time() - t0, osm_time)
+
+    return jsonify({
+        "mapName": map_name,
+        "width": result.width,
+        "height": result.height,
+        "cellsX": result.cells_x,
+        "cellsY": result.cells_y,
+        "featureCount": len(features),
+        "rotation": round(rotation, 1),
+        "osmSeconds": round(osm_time, 2),
+        "renderSeconds": round(render_time, 2),
+        "totalSeconds": round(total_time, 2),
+        "nativeAccelerated": native_ok,
+        # What Overture put in that OpenStreetMap had not got, so the window
+        # can say whether turning it on was worth it here.
+        # What the window warned about and the mapper went ahead with anyway,
+        # so it can say so beside the finished map too.
+        "heavy": heavy,
+        # As they were taken, clamped and saved - not as the page sent them -
+        # so it can tell afterwards which knobs have really been moved since.
+        "settings": settings.to_dict(),
+        # What the gap fill put in that OpenStreetMap had not got - Microsoft's
+        # footprints or Overture, whichever answered - and when it added
+        # nothing, why not, in a sentence the window can show as it stands.
+        "fromGapFill": gaps.get("added", 0),
+        "fromStreetInfill": int(gaps.get("added", 0)),
+        "gapFillWhy": gaps.get("error") or gaps.get("why") or "",
+        # What the optional data layers did (knoxdata/): which applied, the
+        # suggested preset from real land cover, and the region/climate read.
+        "dataLayers": (layers.report.get("used", []) if layers else []),
+        "suggestedPreset": suggested_preset,
+        "region": (layers.region if layers else ""),
+        "climate": (layers.climate if layers else {}),
+        "files": {
+            "landscape": f"/output/{map_name}/{Path(result.landscape_path).name}",
+            "vegetation": f"/output/{map_name}/{Path(result.vegetation_path).name}",
+            "spawn": f"/output/{map_name}/{Path(result.spawn_map_path).name}",
+            "preview": f"/output/{map_name}/{Path(result.preview_path).name}",
+            "buildings": f"/output/{map_name}/{Path(result.buildings_geojson_path).name}",
+            "meta": f"/output/{map_name}/{Path(result.meta_path).name}",
+            "zip": f"/download/{map_name}.zip",
+            "readme": f"/output/{map_name}/README.txt",
+        },
+    })
+
+
+@bp.route("/api/pictures", methods=["POST"])
+def api_pictures():
+    """Draw the map, the way the game would."""
+    data = _json_body()
+    map_dir = _map_dir(data.get("mapName", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    from knoxbuild import picture as pictures
+
+    if not pictures.compiled(map_dir):
+        return jsonify({"error": "Compile the map first - there is nothing to "
+                                 "draw until then."}), 400
+    name = map_dir.name
+    with _PROGRESS_LOCK:
+        if _PICTURES.get(name, {}).get("state") == "running":
+            return jsonify({"started": False, "state": "running"})
+        _PICTURES[name] = {"state": "running", "error": None, "files": []}
+
+    def worker() -> None:
+        log.info("pictures %s: started", name)
+        t0 = time.time()
+        try:
+            made = pictures.pictures_of(map_dir)
+            files = [f"/output/{map_dir.name}/pictures/{p.name}" for p in made]
+            log.info("pictures %s: %d in %.0fs", name, len(files), time.time() - t0)
+            with _PROGRESS_LOCK:
+                _PICTURES[name] = {"state": "done" if files else "error",
+                                   "files": files,
+                                   "error": None if files else "Nothing was drawn."}
+        except Exception as exc:  # noqa: BLE001 - reported to the window
+            eid = knoxlog.record(exc, f"pictures {name}: failed")
+            with _PROGRESS_LOCK:
+                _PICTURES[name] = {"state": "error", "errorId": eid,
+                                   "error": str(exc), "files": []}
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"started": True})
+
+
+@bp.route("/api/pictures-status")
+def api_pictures_status():
+    map_dir = _map_dir(request.args.get("map", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    with _PROGRESS_LOCK:
+        return jsonify(dict(_PICTURES.get(map_dir.name, {"state": "idle", "files": []})))
+
+
+# ---- the rest of the pipeline, so the whole thing lives in one window ----
+
+@bp.route("/api/buildings", methods=["POST"])
+def api_buildings():
+    """Run knoxbuild over a generated map."""
+    from knoxbuild.build import build as build_buildings
+
+    data = _json_body()
+    map_dir = _map_dir(data.get("mapName", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    busy = _hold(map_dir, "built")
+    if busy is not None:
+        return busy
+    settings = Settings.from_dict(data.get("settings"))         if data.get("settings") else _load_settings(map_dir)
+    try:
+        _save_settings(map_dir, settings)
+    except OSError as exc:
+        return failed(f"Could not save this map's settings: {exc}.", 500, exc)
+    terrain = None
+    if "sketch" in data:
+        drawn = data["sketch"]
+        if not isinstance(drawn, dict) or not isinstance(drawn.get("features"), list):
+            return jsonify({"error": "Expected a GeoJSON FeatureCollection."}), 400
+        applied = knoxfiles.read(str(map_dir / f"{map_dir.name}_info.json"), "what the map is", default={})
+        drawn_only = bool(data.get("drawnOnly", applied.get("drawn_only", False)))
+        changed = (applied.get("sketch_hash") != _sketch_signature(drawn)
+                   or bool(applied.get("drawn_only")) != drawn_only)
+        # Old maps with no sketches need no terrain refresh on their first Build.
+        if "sketch_hash" not in applied and not drawn["features"] and not _load_sketch(map_dir).get("features"):
+            changed = drawn_only != bool(applied.get("drawn_only"))
+        if changed:
+            if not applied.get("bbox"):
+                return jsonify({"error": "Generate the map before building its drawings."}), 400
+            log.info("buildings %s: applying changed drawings before building", map_dir.name)
+            refreshed = make_response(_generate({
+                **applied["bbox"], "mapName": map_dir.name,
+                "metersPerTile": applied["meters_per_tile"], "shape": applied.get("shape"),
+                "settings": settings.to_dict(), "sketch": drawn, "drawnOnly": drawn_only}))
+            if refreshed.status_code >= 400:
+                return refreshed
+            terrain = refreshed.get_json()
+    log.info("buildings %s: started", map_dir.name)
+    # Say so now if this PC cannot hold the map's bitmaps, rather than after
+    # minutes of work. Free memory moves, so only a 32-bit Python's hard 2 GB
+    # ceiling refuses outright; anything else is let through and caught below.
+    info = _map_summary(map_dir)
+    tight = _too_big_for_memory(info["width"], info["height"],
+                                BUILD_BYTES_PER_TILE, BUILD_BASE_BYTES)
+    if tight and sys.maxsize <= 2 ** 32:
+        return jsonify({"error": tight}), 507
+    if tight:
+        log.warning("buildings %s: going ahead with a heavy map - %s",
+                    map_dir.name, tight)
+    t0 = time.time()
+    out = io.StringIO()
+    try:
+        from contextlib import redirect_stdout
+        layout_started: float | None = None
+
+        def say(text: str, fraction: float | None) -> None:
+            nonlocal layout_started
+            extra: dict = {}
+            if text.startswith("Laying out buildings:"):
+                if layout_started is None:
+                    layout_started = time.time()
+                parts = text.split(":", 1)[1].split(" of ")
+                if len(parts) == 2:
+                    try:
+                        done = int(parts[0].replace(",", "").strip())
+                        total = int(parts[1].replace(",", "").strip())
+                        extra = {"done": done, "total": total,
+                                 "etaStarted": layout_started, "etaDisable": False}
+                    except ValueError:
+                        pass
+            elif text.startswith("Laying out "):
+                if layout_started is None:
+                    layout_started = time.time()
+                extra = {"done": None, "total": None, "etaStarted": layout_started,
+                         "etaDisable": True}
+            elif fraction is not None and fraction <= 0.05:
+                extra = {"done": None, "total": None, "etaStarted": None,
+                         "etaDisable": True}
+            else:
+                extra = {"done": None, "total": None, "etaStarted": None,
+                         "etaDisable": False}
+            _set_progress(map_dir.name, stage="buildings", note=text,
+                          fraction=fraction, **extra)
+
+        say("Starting", 0.0)
+        with redirect_stdout(out):
+            build_buildings(str(map_dir), settings=settings,
+                            should_stop=_stopper(map_dir.name), progress=say)
+        _set_progress(map_dir.name, stage="buildings-done", note="", fraction=1.0)
+    except knoxstop.Stopped:
+        return _stopped(map_dir.name, "buildings")
+    except knoxfiles.Damaged as exc:
+        # One of the map's own files was left half written. That is the
+        # mapper's to put right by generating the map again, and the message
+        # says so, so it is not dressed up as a failure of the build.
+        return failed(str(exc), 400, exc)
+    except MemoryError as exc:
+        need = info["width"] * info["height"] * BUILD_BYTES_PER_TILE + BUILD_BASE_BYTES
+        return failed(
+            f"Generate buildings ran out of memory. A map of "
+            f"{info['width']}x{info['height']} tiles needs about "
+            f"{need / 1e9:.1f} GB for this step. Close a few things and try "
+            f"again, or draw the map at a larger scale: 2 m a tile is a quarter "
+            f"of the memory of 1 m. Nothing is lost: the map itself is saved, "
+            f"so Generate buildings can simply be run again.", 507, exc)
+    except Exception as exc:
+        log.info("buildings %s output before the error:\n%s", map_dir.name,
+                 out.getvalue()[-4000:])
+        return failed(f"Building generation failed: {exc}", 500, exc)
+    tbx = sorted((map_dir / "buildings").glob("*.tbx"))
+    mapstate.stamp(str(map_dir), "build", took=time.time() - t0)
+    log.info("buildings %s: %d files in %.1fs\n%s", map_dir.name, len(tbx),
+             time.time() - t0, out.getvalue()[-3000:])
+    return jsonify({"count": len(tbx), "terrain": terrain,
+                    "pzw": f"{map_dir.name}.pzw",
+                    # So the window can say what did not get built without
+                    # anybody reading a log for it.
+                    "left_out": _log_left_out(map_dir),
+                    "settings": settings.to_dict(),
+                    "population": _audited(map_dir, _population(map_dir))})
+
+
+def _log_left_out(map_dir) -> dict:
+    """Why footprints did not become buildings, in the log as well as the file.
+
+    The build prints this among everything else it has to say, and only the
+    last 3000 characters of that reach the log - on a map with a lot to report
+    the block scrolls off. It is the first thing wanted when somebody says
+    nothing generated where their house is, and the report zip carries both
+    this line and the file it names (knoxbuild/build.py, knoxlog.report_zip).
+
+    Returns the counts in words as well, which is what the window shows under
+    the Buildings step so that nobody has to go and read a log at all.
+    """
+    from knoxbuild import why
+
+    try:
+        report = why.summary(str(map_dir))
+    except OSError:
+        return {}
+    if not report["total"]:
+        log.info("left out %s: nothing - every footprint became a building",
+                 map_dir.name)
+        return report
+    log.info("left out %s: %d footprints (%s); each one with where and why in %s",
+             map_dir.name, report["total"],
+             ", ".join(f"{line['n']} {line['reason']}"
+                       for line in report["lines"]),
+             f"{map_dir.name}_left_out.csv")
+    return report
+
+
+@bp.route("/api/layout-preview")
+def api_layout_preview():
+    """A picture of what the building step decided - buildings by use, or the
+    zombie heat map - to judge the settings before a long compile."""
+    from knoxbuild import layout_preview
+
+    map_dir = _map_dir(request.args.get("map", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    layer = request.args.get("layer", "kinds")
+    if layer not in layout_preview.LAYERS:
+        return jsonify({"error": f"Unknown layer {layer!r}."}), 400
+    if not (map_dir / f"{map_dir.name}_placements.csv").exists():
+        return jsonify({"error": "Build the buildings first - there is nothing "
+                                 "to show until then."}), 400
+    path = layout_preview.render_to(str(map_dir), layer)
+    return send_file(path, mimetype="image/png", max_age=0)
+
+
+@bp.route("/api/zombies", methods=["POST"])
+def api_zombies():
+    """Recount a built map's zombies with new settings, without rebuilding.
+
+    The spawn map only depends on the buildings' footprints, heights and
+    kinds, which the build saved. Redrawing it takes a second or two against
+    the minutes a full building pass takes, so the zombie dials can be tried
+    freely. The map still needs compiling again for the game to see it.
+    """
+    from knoxbuild.population import recount
+
+    data = _json_body()
+    map_dir = _map_dir(data.get("mapName", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    # Same rule as Generate buildings: settings sent with the request stand on
+    # their own. Layering them over the saved ones let a saved value outrank
+    # the preset being asked for, so "town" after a recount at 1.5 stayed 1.5.
+    settings = Settings.from_dict(data.get("settings"))         if data.get("settings") else _load_settings(map_dir)
+    try:
+        _save_settings(map_dir, settings)
+    except OSError as exc:
+        return failed(f"Could not save this map's settings: {exc}.", 500, exc)
+    try:
+        summary = recount(str(map_dir), settings)
+    except FileNotFoundError as exc:
+        return failed(f"Cannot recount zombies: {exc}.", 400, exc)
+    return jsonify({"population": _audited(map_dir, summary)})
+
+
+@bp.route("/api/worlded", methods=["POST"])
+def api_worlded():
+    """Open the generated project in PZWorldEd."""
+    import subprocess
+
+    data = _json_body()
+    map_dir = _map_dir(data.get("mapName", ""))
+    if map_dir is None:
+        return jsonify({"error": "Unknown map."}), 404
+    import knoxpaths
+
+    exe = _worlded_exe()
+    if exe is None:
+        return jsonify({"error": "PZWorldEd not found. Set the PZWORLDED "
+                                 "environment variable to its full path."}), 400
+    pzw = map_dir / f"{map_dir.name}.pzw"
+    if not pzw.exists():
+        return jsonify({"error": "No .pzw yet — generate the buildings first."}), 400
+    try:
+        subprocess.Popen(knoxpaths.command_for(exe) + [str(pzw)])
+    except OSError as exc:
+        # Wine missing, or the tool moved since it was found: a request that
+        # cannot start a program is the caller's problem to read, not a 500.
+        return failed(f"Could not start PZWorldEd: {exc}.", 400, exc)
+    return jsonify({"launched": str(pzw)})
+
+
+# Pictures of a finished map: drawn from the compiled cells the game itself
+# loads, so they are the map rather than an impression of it. A town takes the
+# best part of a minute, so it runs on its own thread and the page asks.
+_PICTURES: dict[str, dict] = {}
+
+
+def _write_readme(map_dir: Path, map_name: str, result: renderer.RenderResult) -> None:
+    text = f"""Project Zomboid map: {map_name}
+Generated by KnoxMap.
+
+Bitmap dimensions: {result.width}x{result.height} tiles
+Cell grid:         {result.cells_x} x {result.cells_y} (cells are always 300 tiles)
+
+Files
+-----
+{map_name}.bmp                  Landscape (base terrain — WorldEd's main input)
+{map_name}_veg.bmp              Vegetation (trees, bushes, long grass)
+{map_name}_ZombieSpawnMap.bmp   Zombie population (grayscale, 1/10 scale)
+{map_name}_preview.png          Human-viewable preview of what you'll get
+{map_name}_buildings.geojson    Building footprints from OSM (for reference)
+{map_name}_info.json            Meta: bbox, scale, cell count
+{map_name}.zip                  Everything in this folder, from the web UI
+
+How to import (per Thuztor's Mapping Guide v0.2, chapter 2)
+-----------------------------------------------------------
+1. Open WorldEd (part of the Zomboid Mapping Tools).
+2. File -> New, and choose a {result.cells_x} x {result.cells_y} cell grid.
+3. From your file browser, drag {map_name}.bmp onto the empty grid.
+   (WorldEd reads the matching {map_name}_veg.bmp automatically if it sits
+   next to the landscape bitmap with the same base filename.)
+4. File -> BMP to TMX -> All cells. Set an export folder for the .tmx output.
+5. Open the resulting project in WorldEd / TileZed to place buildings
+   (.tbx files) on top of the landscape. This tool does NOT place PZ
+   buildings — OSM building footprints are exported as GeoJSON for
+   reference only.
+6. File -> Generate Lots. This produces .lotheader + .lotpack files.
+7. Copy those into your game's media/maps folder (see chapter 9 of the
+   guide for offset / world-origin details).
+
+Notes
+-----
+* Roads render as asphalt (residential = light, secondary = medium,
+  primary/motorway = dark). Paths and tracks render as dirt lines.
+* Forests render as dense trees in the interior and a grass+tree blend
+  at the edges so the transition isn't a hard rectangle.
+* The spawn map is generated procedurally: higher density on asphalt,
+  zero on water, slight randomness throughout.
+* OSM building footprints CANNOT be converted directly to PZ buildings —
+  PZ buildings are a separate thing you assemble in BuildingEd (.tbx).
+  The GeoJSON file lets you see where buildings would sit in the real
+  world and drop matching .tbx lots in the right tiles.
+"""
+    # UTF-8 whatever the PC's code page: the text has dashes that a Korean or
+    # Japanese Windows cannot write in its own, and the whole generate request
+    # failed on them after the map was already drawn.
+    (map_dir / "README.txt").write_text(text, encoding="utf-8")
