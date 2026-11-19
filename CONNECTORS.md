@@ -42,3 +42,18 @@ Road connects at the Isilkul south edge (`y=64`) and enters Solntsevka/Vodnoye.
 - A road must end exactly on both seam cells.
 - Forest/fields must not leave a visible void at the seam.
 - Recompile both sides after moving.
+
+## Wide rural belt (revised)
+
+A one-cell "кишка" is rejected. The connector is a **wide rural belt**, split
+into several map rectangles that cover every playable cell between the cities
+and the outer boundary:
+
+- no empty cells between city maps and the belt;
+- lakes, villages, roads, fields and forest taken from OSM;
+- forest/field edges used to hide the 1.75 -> 8 m/tile detail transition;
+- each rural map has no complex interiors, so it stays under the building-state
+  limit and is cheap to load.
+
+The belt is split into maps rather than one giant map, so the save limit and
+memory budget stay bounded.
