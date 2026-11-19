@@ -49,6 +49,39 @@ def generate():
     return _generate(_json_body())
 
 
+@bp.route("/api/prefetch", methods=["POST"])
+def prefetch():
+    """Download the OSM and land-cover data a map needs, without rendering it."""
+    data = _json_body()
+    try:
+        south = float(data["south"]); west = float(data["west"])
+        north = float(data["north"]); east = float(data["east"])
+        scale = float(data.get("metersPerTile", 1.0))
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid bbox / scale."}), 400
+    (south, west, north, east), why = _normalise_bbox(south, west, north, east)
+    if why:
+        return jsonify({"error": why}), 400
+    map_name = SAFE_NAME.sub("_", str(data.get("mapName") or "prefetch")).strip("_") or "prefetch"
+    map_dir = common.OUTPUT_DIR / map_name
+    map_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings.from_dict(data.get("settings"))
+    _save_settings(map_dir, settings)
+    bbox = (south, west, north, east)
+    cache, fetch_box = _osm_cache_for(map_dir, bbox, tidy_scale(scale), settings)
+    features = osm.load_cache(cache, fetch_box)
+    if features is None:
+        def progress(i, total, note=""):
+            _set_progress(map_name, stage="prefetch", done=max(0, i - 1), total=total, note=note)
+        features = osm.fetch_features_tiled(
+            *fetch_box, max_tile_km2=OVERPASS_TILE_KM2, progress=progress,
+            should_stop=_stopper(map_name))
+        osm.save_cache(cache, fetch_box, features)
+    import knoxdata
+    _fetch_landcover(knoxdata, settings, bbox, map_name)
+    return jsonify({"ok": True, "mapName": map_name, "features": len(features)})
+
+
 @bp.route("/api/forecast", methods=["POST"])
 def api_forecast():
     """How long this area will take, from how long the last maps did.

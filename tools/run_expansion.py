@@ -52,6 +52,30 @@ def api(path: str, body: dict | None = None, timeout: int = 60):
     return json.loads(raw) if raw else {}
 
 
+def notify(title: str, body: str) -> None:
+    """Send a desktop notification when the user has a session bus."""
+    try:
+        subprocess.run(["notify-send", "-i", "dialog-information", title, body],
+                       env={**__import__("os").environ, "DISPLAY": ":1"},
+                       check=False, timeout=10)
+    except Exception:
+        pass
+
+
+def prefetch(map_name: str, spec: dict, settings: dict) -> None:
+    body = {
+        "south": spec["south"], "west": spec["west"],
+        "north": spec["north"], "east": spec["east"],
+        "metersPerTile": spec["scale"], "mapName": map_name,
+        "settings": settings,
+    }
+    log(f"prefetch {map_name}: OSM and land cover")
+    result = api("/api/prefetch", body, timeout=8 * 3600)
+    if result.get("error"):
+        raise SystemExit(f"prefetch {map_name}: {result['error']}")
+    log(f"prefetch {map_name}: features={result.get('features')}")
+
+
 def wait_health() -> None:
     health = api("/api/health")
     if not health.get("ready"):
@@ -176,6 +200,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true", help="regenerate maps that already exist")
     parser.add_argument("--only", action="append", default=[], help="map id; repeatable")
+    parser.add_argument("--skip-prefetch", action="store_true",
+                        help="skip the download-only phase")
     args = parser.parse_args()
 
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
@@ -194,6 +220,12 @@ def main() -> int:
 
     wait_health()
     MERGED.mkdir(parents=True, exist_ok=True)
+    if not args.skip_prefetch:
+        for spec in maps:
+            prefetch(spec["id"], spec, settings)
+        log("all downloads complete; internet can be disconnected")
+        notify("Omsk Expansion: данные скачаны",
+               "OSM и WorldCover загружены. Интернет можно отключить.")
     for spec in maps:
         name = spec["id"]
         log(f"=== {name} ===")
@@ -211,6 +243,8 @@ def main() -> int:
 
     write_mod_info()
     log(f"done: {MERGED}")
+    notify("Omsk Expansion готов",
+           "Все карты собраны и добавлены в dist/omsk-expansion")
     return 0
 
 
