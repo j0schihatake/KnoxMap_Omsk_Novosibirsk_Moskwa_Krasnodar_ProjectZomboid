@@ -1,0 +1,15 @@
+{
+  "tree_density": 2.2,
+  "forest_density": 1.8,
+  "forest_big_trees": 1.25,
+  "forest_groves": 1.2,
+  "forest_shrubland": 1.2,
+  "parking_density": 1.5,
+  "fill_frontage": 1,
+  "spawn_density": 6,
+  "zombies_per_resident": 0.8,
+  "apartment_chance": 0.65,
+  "max_levels": 9,
+  "room_size": 24,
+  "basement_share": 0.25
+}
