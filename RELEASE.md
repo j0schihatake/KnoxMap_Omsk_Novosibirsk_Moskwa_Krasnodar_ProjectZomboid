@@ -4,7 +4,7 @@
 
 - Beautify pass on all six maps: benches, outdoor lamps and bins.
 - 256x256 Workshop preview with the map and all six city names.
-- PZMapStudio 0.2.0 bundled separately as a Java/Lua tool.
+- PZMapStudio 0.2.0 is published as a separate Workshop item (map item contains maps only).
 - Workshop layout uses `Contents/mods/OmskExpansion/`.
 
 ## Maps
