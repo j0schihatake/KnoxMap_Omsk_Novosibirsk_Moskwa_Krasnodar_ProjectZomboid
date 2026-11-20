@@ -12,34 +12,20 @@ OpenStreetMap:
 - Новосибирск;
 - Москва.
 
-Внутри — леса, поля, деревни, дороги, мебель, интерьеры, зомби и точки спавна.
+Внутри — леса, поля, деревни, дороги, интерьеры, мебель, зомби и точки спавна.
 Карты продолжают стандартный мир: можно начать в обычном PZ и доехать до новых
 городов.
 
-### В комплекте — PZMapStudio для ИИ-агентов
+---
 
-В папке мода лежит инструмент **PZMapStudio**:
+## PZMapStudio — инструмент для ИИ-агента
 
-```text
-PZMapStudio/
-  PZMapStudio-v0.1.0.zip
-  README.txt
-  launch.sh
-  launch.bat
-```
+В комплекте идёт **PZMapStudio**: java-core и агентский интерфейс для работы с
+картой. Это не просто внешний скрипт — Java-ядро читает и пишет реальные клетки
+PZ, умеет безопасно применять изменения с backup, а в игре работает через
+Java/Lua-мод.
 
-Он умеет:
-
-- импортировать реальные клетки PZ;
-- строить дома с этажами и мебелью;
-- делать контуры зданий по крыше;
-- ставить дороги, тротуары, заборы и ворота;
-- добавлять крышные лестницы;
-- размещать места историй;
-- искать адрес, фото и планировку;
-- проверять карту и писать изменения обратно в клетки.
-
-### Как начать
+### Принцип работы
 
 1. Подпишитесь на мод.
 2. Запустите Project Zomboid и создайте **новый save**.
@@ -47,28 +33,65 @@ PZMapStudio/
 4. Откройте своего ИИ-агента.
 5. Скажите ему:
 
-> Найди в папке игры или Workshop папку `PZMapStudio`. Прочитай
-> `README.txt`, выполни `python3 -m pzmapstudio.cli help --json` и помоги
-> мне доработать карту.
+> Найди в папке игры или Workshop папку `PZMapStudio`. Прочитай `README.txt`,
+> выполни `help` и помоги мне доработать карту: расставь лавочки в парках,
+> поправь дороги, добавь крышный доступ и места историй.
 
-Или вручную:
+Агент сам находит инструмент, читает инструкцию и работает с картой.
 
-```bash
-cd .../steamapps/workshop/content/108600/<ID>/PZMapStudio/
-bash launch.sh
-```
+### Что умеет
 
-Нужны Python 3.11+ и Pillow.
+- читать реальные `.lotheader/.lotpack`;
+- импортировать terrain, дороги, здания, комнаты и мебель;
+- строить дома с этажами и практичной мебелью;
+- строить здания по контуру крыши;
+- ставить дороги, тротуары, заборы, ворота и лавочки;
+- добавлять крышные лестницы;
+- размещать story-сайты;
+- расставлять лавочки у парков и аллей по координатам/OSM;
+- проверять карту: дубли клеток, спавны, save-state, комнаты;
+- писать изменения в реальные клетки с backup и валидацией.
 
-Steam Workshop не запускает внешние программы автоматически: он доставляет
-файлы, а инструмент запускается вручную или агентом.
+### Два режима
 
-### Важно
+**В игре — Java/Lua-мод:**
 
-- это большой мод, около 6.2 GB;
-- нужен новый мир, старый save не подойдёт;
-- не включайте одновременно старую отдельную копию Исилькуля;
-- данные карт: © OpenStreetMap contributors, ODbL.
+- `F10` — панель: JSON-команды сцены, staging, Apply cell, Horde, Loot;
+- `F11` — observer: игрок, время, температура;
+- файловая очередь команд для агента:
+  ```text
+  ~/Zomboid/PZMapStudio/queue.jsonl
+  ```
+- live-события: зомби, лут, объекты;
+- запись клетки с backup.
+
+**Без игры — standalone Java/Python:**
+
+- CLI и HTTP API;
+- массовые road-pass/object-pass;
+- аудит и подготовка карт;
+- работа с будущими картами и обновлениями игры.
+
+### Безопасность
+
+- изменения клеток только через backup;
+- проверка заголовка и комнат после записи;
+- активный save не переписывается молча;
+- новый мир обязателен для добавления карт.
+
+### Требования
+
+- Java 25 для standalone Java-инструментов;
+- Python 3.11+ и Pillow — только для дополнительного Python-набора;
+- Java-мод работает без Python.
+
+### Ограничение
+
+Это **beta**: Java-мод и live-рассказчик развиваются. Карты уже играбельны;
+редактор в игре пока даёт сцену, staging, apply-cell, observer и live-события,
+а полноценный RimWorld-подобный планировщик историй — следующий этап.
+
+Данные карт: © OpenStreetMap contributors, ODbL.
 
 ---
 
@@ -76,28 +99,18 @@ Steam Workshop не запускает внешние программы авт�
 
 **Omsk Expansion** adds six connected Project Zomboid maps built from real
 OpenStreetMap data: Isilkul, Solntsevka/Vodnoye, Omsk, Krasnodar, Novosibirsk
-and Moscow — with forests, fields, villages, roads, furnished interiors,
-zombies and spawn points. The maps continue the vanilla world.
+and Moscow.
 
-The mod also ships **PZMapStudio**, an agent-friendly map editor:
+The pack also ships **PZMapStudio**, a Java-core map tool for AI agents:
+subscribe, start a new save, open your agent and ask it to find `PZMapStudio`
+in the game/Workshop folder and read `README.txt`/`help`.
 
-```text
-PZMapStudio/
-  PZMapStudio-v0.1.0.zip
-  README.txt
-  launch.sh
-  launch.bat
-```
+PZMapStudio can import real cells, build houses and furniture, place roads,
+fences and park benches, add roof access and story sites, audit maps, and write
+changes back to compiled cells with backup and validation.
 
-After subscribing:
+Java mod: F10 panel/apply-cell/observer/horde/loot and a file command queue.
+Standalone Java/Python: CLI, HTTP API, map audits and batch passes.
 
-1. Start a **new save** and enable `Omsk Expansion`.
-2. Open your AI agent.
-3. Ask it:
-
-> Find `PZMapStudio` in the game/Workshop folder, read `README.txt`, run
-> `python3 -m pzmapstudio.cli help --json`, and help me edit the map.
-
-The Workshop delivers the files; Steam cannot auto-run external Python programs.
-Python 3.11+ and Pillow are required. Map data © OpenStreetMap contributors,
-ODbL.
+Beta: maps are playable; the in-game editor and RimWorld-style storyteller are
+under active development. Map data © OpenStreetMap contributors, ODbL.
