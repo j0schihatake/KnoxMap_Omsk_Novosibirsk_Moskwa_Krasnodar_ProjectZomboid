@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+- Added five SoD-inspired home bases to Trumbull Valley.
+- Bases: Pterodactyl Ptark, Tranquility Factory, Agricultural Complex, Fort Marshall, Red Talon FOB.
+- Each has compound yard, command, infirmary, barracks and storage.
+- Trumbull now has 227 rooms / 74 buildings.
+
+
 ## 1.2.0
 
 - Added Trumbull Valley: 930 cells, 133 rooms, 60 buildings, 6 spawns.

@@ -1,4 +1,4 @@
-# Omsk Expansion 1.2.0
+# Omsk Expansion 1.3.0
 
 ## What's new
 
