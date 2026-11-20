@@ -4,8 +4,8 @@
 
 ```text
 folder: dist/omsk-expansion
-size:   ~5.7 GB
-cells:  4069
+size:   ~7.1 GB
+cells:  4999
 duplicate cells: 0
 unconnected maps: 0
 ```
@@ -14,6 +14,7 @@ Validation:
 
 ```text
 Isilkul           168 cells  ok
+Trumbull Valley   930 cells  ok
 Solntsevka        252 cells  ok
 Omsk              930 cells  ok
 Krasnodar         837 cells  ok

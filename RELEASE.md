@@ -1,4 +1,4 @@
-# Omsk Expansion 1.1.0
+# Omsk Expansion 1.2.0
 
 ## What's new
 
@@ -19,7 +19,7 @@ Moscow            868 cells
 ```
 
 ```text
-4069 cells, 0 duplicate cells, 0 unconnected maps
+4999 cells, 0 duplicate cells, 0 unconnected maps
 ```
 
 `map-save-audit` still reports a conservative upper bound above 90%; a real
