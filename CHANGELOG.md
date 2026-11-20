@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.1
+
+- Renamed compiled map folders to ASCII so Project Zomboid lists all spawn regions.
+- Titles remain Russian; only directory names changed.
+
+
 ## 1.3.0
 
 - Added five SoD-inspired home bases to Trumbull Valley.
