@@ -2,8 +2,8 @@
 
 ## What's new
 
-- Beautify pass on all six maps: benches, outdoor lamps and bins.
-- 256x256 Workshop preview with the map and all six city names.
+- Beautify pass on the six base maps: benches, outdoor lamps and bins.
+- 256x256 Workshop preview with all seven map names.
 - PZMapStudio 0.2.0 is published as a separate Workshop item (map item contains maps only).
 - Workshop layout uses `Contents/mods/OmskExpansion/`.
 

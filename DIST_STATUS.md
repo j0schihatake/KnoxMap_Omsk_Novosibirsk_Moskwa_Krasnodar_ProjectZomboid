@@ -22,9 +22,9 @@ Novosibirsk      1014 cells  ok
 Moscow            868 cells  ok
 ```
 
-Art pass: benches, outdoor lamps and bins on all six maps.
+Art pass: benches, outdoor lamps and bins on the six base maps. Trumbull Valley uses the manifest-driven typed-building layout.
 
-Preview: `preview.png`, 256x256, map + city list.
+Preview: `preview.png`, 256x256, 7 map names including Trumbull Valley.
 
 ## PZMapStudio
 
