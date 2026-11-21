@@ -147,7 +147,24 @@ to claim and hard for zombies to enter:
 - spawn point inside every camp;
 - no zombie-sensitive spawn right at the gate.
 
-## Phase 8 — final defect pass
+## Phase 8 — rivers, canals and bridges
+
+Before the final defect pass:
+
+- add a connected river system across the map pack;
+- connect the Dread Dawn canal, Following river/lake and at least one
+  Harran/Danforth canal;
+- make water flow continuously across map borders, not stop at a cell edge;
+- every road crossing water gets a real bridge:
+  - asphalt deck across the water;
+  - bridge rails/edges;
+  - no road dead-ending at the river;
+- keep bridge approaches clear of buildings and fences;
+- add a few small bridges for pedestrian paths;
+- bridges must be wide enough for cars;
+- mark bridge cells and run a drive-width check.
+
+## Phase 9 — final defect pass
 
 Walk every map one last time and look for:
 
@@ -161,7 +178,7 @@ Walk every map one last time and look for:
 - prisons that do not look like prisons;
 - map display missing for any map.
 
-## Phase 9 — final optimization
+## Phase 10 — final optimization
 
 After the defect pass:
 
