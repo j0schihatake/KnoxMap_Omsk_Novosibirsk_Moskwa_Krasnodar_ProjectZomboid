@@ -121,6 +121,12 @@ key audit: new maps covered; old SoD shops still missing
 - Add concrete/plaza surfaces, fences, courtyards and distinctive landmark
   facades.
 - Make hero buildings less generic.
+- Road target (reference screenshots):
+  - wide multi-lane asphalt;
+  - yellow centre line and white lane marks;
+  - a paved shoulder outside the outer white line;
+  - a green verge beyond the shoulder, not grass in the road;
+  - connector roads between maps should look the same as city arterials.
 
 ## Phase 6 — optimization
 
