@@ -54,15 +54,18 @@ Add by hand, with fences and access roads:
 ```text
 2 prisons      Harran Central Prison, Danforth State Prison
 2 villages     The Following village, Harran Outskirts
-2 new bases    Harran Military Base, Dread Dawn Military Base
+2 new bases    Harran Military Base, Harran Airfield Base
+2 new bases    Dread Dawn Military Base, Dread Dawn Armory Base
+1 new base     Danforth National Guard
+2 camps        Roadside Camp, Hidden Forest Camp
 existing       Danforth evacuation base, Dread north checkpoint,
                SoD bases (need visual upgrade)
 ```
 
-Roads and fences are present. Spawn points added.
+Roads, fences and spawn points are present.
 
-Remaining: 5 more bases with the full military layout and the visual upgrade
-of the old SoD bases.
+Remaining: visual upgrade of the old SoD bases, 2 more survivor camps, and the
+final beauty/optimization passes.
 
 ### Military bases must read as bases
 
