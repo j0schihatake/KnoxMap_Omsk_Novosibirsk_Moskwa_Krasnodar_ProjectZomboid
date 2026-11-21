@@ -49,6 +49,21 @@ Add by hand, with fences and access roads:
 - Road connections from the nearest main road.
 - Spawn points inside each location.
 
+### Current status
+
+```text
+2 prisons      Harran Central Prison, Danforth State Prison
+2 villages     The Following village, Harran Outskirts
+2 new bases    Harran Military Base, Dread Dawn Military Base
+existing       Danforth evacuation base, Dread north checkpoint,
+               SoD bases (need visual upgrade)
+```
+
+Roads and fences are present. Spawn points added.
+
+Remaining: 5 more bases with the full military layout and the visual upgrade
+of the old SoD bases.
+
 ### Military bases must read as bases
 
 Every base needs:
