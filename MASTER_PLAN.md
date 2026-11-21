@@ -105,6 +105,15 @@ Every prison needs:
 - Road continuity and drive test.
 - In-game map display check (`worldmap.xml.bin` for every map).
 
+### Current verification
+
+```text
+floor audit: 0 missing on Omsk_World and all SoD2 maps
+map display: worldmap.xml.bin present on all maps
+road validation: Trumbull, Providence, Meagher, Drucker, Cascade ok
+key audit: new maps covered; old SoD shops still missing
+```
+
 ## Phase 5 — beauty and originality
 
 - Remove grass/bush overgrowth from roads and city edges.
