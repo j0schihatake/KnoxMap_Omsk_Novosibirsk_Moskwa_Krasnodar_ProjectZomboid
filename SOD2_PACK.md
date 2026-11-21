@@ -11,7 +11,8 @@ Providence Ridge   650 cells
 Danforth           400 cells
 Harran City        576 cells
 The Following      576 cells
-total             5082 cells
+Dread Dawn         576 cells
+total             5658 cells
 ```
 
 Each region has hand-authored bases and landmarks:
@@ -34,6 +35,8 @@ Harran City        The Tower, St. Joseph's Hospital, Harran High School,
                    Harran Depot, Police Station
 The Following      Countryside Chapel, Bilal Farm, Grain Store,
                    Village Market, farmhouses, fields, river and forest
+Dread Dawn         School Camp, Hospital, North Checkpoint, Police Station,
+                   Quarantine Gun Shop, Food Market, Bus Station, canal
 ```
 
 Placement:
@@ -43,6 +46,7 @@ x = 109..138  Trumbull Valley
 x = 139..163  Meagher, Drucker, Cascade, Providence
 x = 164..183  Danforth
 x = 184..207  Harran City (y=0..23), The Following (y=24..47)
+x = 208..231  Dread Dawn
 ```
 
 Danforth connects to Meagher/east edge. Harran connects to Danforth and to
