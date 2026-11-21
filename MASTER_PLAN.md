@@ -116,7 +116,24 @@ Every prison needs:
 - New save + drive test.
 - Commit compiled cells to the local cell git.
 
-## Phase 7 — final defect pass
+## Phase 7 — survivor camps
+
+Before the final optimization, add survivor camps that are easy for a player
+to claim and hard for zombies to enter:
+
+- high palisade wall around the whole camp;
+- one narrow gate / choke point, with a fence maze or vehicle barrier;
+- no open gaps in the perimeter;
+- inside: 2–4 small cabins, garden plots, rain collectors, storage,
+  campfire, workbench, watch post;
+- cleared interior (no grass/bush tiles inside the palisade);
+- accessible by a narrow path/road, not a wide highway;
+- 2 camps visible near roads;
+- 2 camps hidden in forest, away from the main road;
+- spawn point inside every camp;
+- no zombie-sensitive spawn right at the gate.
+
+## Phase 8 — final defect pass
 
 Walk every map one last time and look for:
 
@@ -130,7 +147,7 @@ Walk every map one last time and look for:
 - prisons that do not look like prisons;
 - map display missing for any map.
 
-## Phase 8 — final optimization
+## Phase 9 — final optimization
 
 After the defect pass:
 
