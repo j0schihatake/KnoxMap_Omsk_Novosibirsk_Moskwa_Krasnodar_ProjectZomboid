@@ -11,14 +11,16 @@ Mazzara Farm, Squelones Brewing, Sasser Regional Hospital.
 **Drucker County** — пустынный округ, Mike's Concrete, Barricaded Strip Mall,
 Knights Drive-In, Wheelhouse Truck Stop, Lundegaard Mansion.
 
+**Providence Ridge** — лесной север, Firewatch Fortress, Rusty Rosie's, Lumber Mill, Red Talon FOB, Tranquility Factory.
+
 **Cascade Hills** — холмы и мосты, Container Fort, Bridge Fort,
 Church on the Hill, Corner Office, Cash Beaumont's.
 
 ## Размер
 
 ```text
-4 карты
-2880 клеток
+5 карт
+3530 клеток
 Trumbull 930 + три региона по 650
 5 баз/достопримечательностей на карту
 ```
