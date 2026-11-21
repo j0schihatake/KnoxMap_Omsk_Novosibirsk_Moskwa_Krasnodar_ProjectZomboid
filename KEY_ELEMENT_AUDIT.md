@@ -24,7 +24,7 @@ positions.
 ```text
 map                 weapons  food  medical  police  school  church  military
 Danforth               15     30      28      12      40      16       8
-Harran City            16     16      14       0*     18      10      12
+Harran City            16     16      14       8      18      10      12
 The Following           0      0       0       0       0      18       0
 Trumbull Valley         0      3       6       0      12       8      18
 Meagher Valley          0      1       6       0       0       0       6
@@ -32,9 +32,6 @@ Drucker County          0      1       0       0       0       0       4
 Cascade Hills           0      0       0       0       0       6       6
 Providence Ridge        0      0       0       0       0       0      10
 ```
-
-`*` Harran headers contain `police` rooms, but the first audit pass reported
-zero; a rescan is needed after the next rebuild.
 
 ## Positioning
 
