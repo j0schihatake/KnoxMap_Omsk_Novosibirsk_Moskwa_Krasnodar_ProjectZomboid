@@ -20,15 +20,13 @@ Drucker County     Mike's Concrete, Barricaded Strip Mall,
                    Lundegaard Mansion
 Cascade Hills      Container Fort, Bridge Fort, Church on the Hill,
                    Corner Office, Cash Beaumont's
-Providence Ridge   Firewatch Fortress, Rusty Rosie's, Lumber Mill,
-                   Red Talon FOB, Tranquility Factory
 ```
 
 Placement:
 
 ```text
 x = 139
-Meagher y=0, Drucker y=26, Cascade y=52, Providence y=78
+Meagher y=0, Drucker y=26, Cascade y=52, Trumbull y=0 (x=109)
 ```
 
 The pack is intentionally separate from the 7-map base pack:

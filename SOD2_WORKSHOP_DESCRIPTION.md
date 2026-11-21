@@ -14,15 +14,12 @@ Knights Drive-In, Wheelhouse Truck Stop, Lundegaard Mansion.
 **Cascade Hills** — холмы и мосты, Container Fort, Bridge Fort,
 Church on the Hill, Corner Office, Cash Beaumont's.
 
-**Providence Ridge** — лесной север, Firewatch Fortress, Rusty Rosie's,
-Lumber Mill, Red Talon FOB, Tranquility Factory.
-
 ## Размер
 
 ```text
 4 карты
-2600 клеток
-650 клеток на карту
+2880 клеток
+Trumbull 930 + три региона по 650
 5 баз/достопримечательностей на карту
 ```
 
