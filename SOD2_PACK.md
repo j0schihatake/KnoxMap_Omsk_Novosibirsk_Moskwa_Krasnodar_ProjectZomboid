@@ -7,7 +7,7 @@ Trumbull Valley    930 cells
 Meagher Valley     650 cells
 Drucker County     650 cells
 Cascade Hills      650 cells
-total              2880 cells
+total              3530 cells
 ```
 
 Each region has five hand-authored bases/landmarks:
