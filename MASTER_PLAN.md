@@ -58,14 +58,16 @@ Add by hand, with fences and access roads:
 2 new bases    Dread Dawn Military Base, Dread Dawn Armory Base
 1 new base     Danforth National Guard
 2 camps        Roadside Camp, Hidden Forest Camp
+2 camps        Harran Camp, Danforth Camp
+fenced village The Following village perimeter + gates
 existing       Danforth evacuation base, Dread north checkpoint,
                SoD bases (need visual upgrade)
 ```
 
 Roads, fences and spawn points are present.
 
-Remaining: visual upgrade of the old SoD bases, 2 more survivor camps, and the
-final beauty/optimization passes.
+Remaining: visual upgrade of the old SoD bases, wide roads on old SoD maps,
+beauty pass and final audits/optimization.
 
 ### Military bases must read as bases
 
