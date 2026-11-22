@@ -110,8 +110,11 @@ Every prison needs:
 ```text
 floor audit: 0 missing on Omsk_World and all SoD2 maps
 map display: worldmap.xml.bin present on all maps
-road validation: Trumbull, Providence, Meagher, Drucker, Cascade ok
-key audit: new maps covered; old SoD shops still missing
+road validation: all 10 maps validate ok
+key audit: shops added to old SoD towns; Trumbull/Providence renamed rooms
+shoulders: 3-tile sidewalk export
+street props: added, then thinned for optimization
+canals/bridges: Dread Dawn ↔ The Following connected
 ```
 
 ## Phase 5 — beauty and originality
